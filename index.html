@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280">
+<title>Summit Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%;
+  font-family: 'Jost', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fafaf8;
+  color: #1a1a18;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+.loading-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+}
+.loading-wrap .brand {
+  font-size: 24px;
+  font-weight: 400;
+  letter-spacing: 0.05em;
+}
+.loading-wrap .status {
+  font-size: 12px;
+  color: #6b6860;
+}
+.loading-wrap .error {
+  color: #c0392b;
+  font-size: 12px;
+}
+.logout-btn {
+  margin-top: 8px;
+  padding: 8px 24px;
+  font-family: 'Jost', sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: #6b6860;
+  background: transparent;
+  border: 1px solid #e8e5e0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.logout-btn:hover { opacity: 0.7; }
+</style>
+</head>
+<body>
+
+<div class="loading-wrap">
+  <div class="brand">Summit</div>
+  <div class="status" id="status">Authenticating...</div>
+  <button class="logout-btn" id="logout-btn" style="display:none;">Sign out</button>
+</div>
+
+<script src="env.js"></script>
+<script type="module">
+import { initAuth, getCurrentUser, signOut } from './js/auth.js';
+
+const statusEl = document.getElementById('status');
+
+async function boot() {
+  const result = await initAuth();
+
+  switch (result.status) {
+    case 'authenticated':
+      const user = getCurrentUser();
+      statusEl.textContent = `Signed in as ${user.name} (${user.label})`;
+      document.getElementById('logout-btn').style.display = '';
+      startInactivityTimer();
+      // Phase 2: load the full app shell here
+      break;
+    case 'unauthorized':
+      statusEl.className = 'error';
+      statusEl.textContent = 'This account is not authorized.';
+      break;
+    case 'no-session':
+      // initAuth already redirects to login.html
+      break;
+  }
+}
+
+boot();
+
+// ─── Logout ──────────────────────────────────────────────
+document.getElementById('logout-btn').addEventListener('click', () => signOut());
+
+// ─── Auto-logout after 2 hours of inactivity ────────────
+function startInactivityTimer() {
+  const TIMEOUT = 2 * 60 * 60 * 1000; // 2 hours
+  let timer = setTimeout(() => signOut(), TIMEOUT);
+
+  const reset = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => signOut(), TIMEOUT);
+  };
+
+  for (const evt of ['mousemove', 'keydown', 'scroll', 'click', 'touchstart']) {
+    document.addEventListener(evt, reset, { passive: true });
+  }
+}
+</script>
+</body>
+</html>

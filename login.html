@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280">
+<title>Summit Admin — Sign In</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --w: #ffffff;
+  --off: #fafaf8;
+  --b: #e8e5e0;
+  --t: #1a1a18;
+  --t2: #6b6860;
+  --t3: #a8a49e;
+  --green: #2d6a4f;
+  --greenl: #eaf4ef;
+  --red: #c0392b;
+  --redl: #fdf0ee;
+}
+
+html, body {
+  height: 100%;
+  font-family: 'Jost', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--off);
+  color: var(--t);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.login-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-card {
+  width: 380px;
+  background: var(--w);
+  border: 1px solid var(--b);
+  border-radius: 12px;
+  padding: 40px 36px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+
+.login-brand {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.login-brand-name {
+  font-family: 'Jost', sans-serif;
+  font-size: 28px;
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  color: var(--t);
+}
+
+.login-brand-sub {
+  font-size: 10px;
+  color: var(--t3);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+.login-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--t2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+
+.login-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-family: 'Jost', sans-serif;
+  font-size: 14px;
+  border: 1px solid var(--b);
+  border-radius: 6px;
+  background: var(--off);
+  color: var(--t);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.login-input:focus {
+  border-color: var(--t3);
+}
+
+.login-btn {
+  width: 100%;
+  margin-top: 20px;
+  padding: 11px;
+  font-family: 'Jost', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--w);
+  background: var(--t);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.login-btn:hover { opacity: 0.85; }
+.login-btn:disabled { opacity: 0.4; cursor: default; }
+
+.login-msg {
+  margin-top: 16px;
+  font-size: 12px;
+  text-align: center;
+  min-height: 18px;
+}
+
+.login-msg.success { color: var(--green); }
+.login-msg.error { color: var(--red); }
+
+.login-step { display: none; }
+.login-step.active { display: block; }
+
+.otp-code-input {
+  text-align: center;
+  letter-spacing: 0.3em;
+  font-size: 20px;
+  font-weight: 500;
+}
+</style>
+</head>
+<body>
+
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="login-brand-name">Summit</div>
+      <div class="login-brand-sub">Admin Portal</div>
+    </div>
+
+    <!-- Step 1: Email -->
+    <div class="login-step active" id="step-email">
+      <label class="login-label" for="email-input">Email address</label>
+      <input class="login-input" id="email-input" type="email" placeholder="you@summit-mgmtx.com" autocomplete="email" autofocus>
+      <button class="login-btn" id="email-btn" onclick="handleSendCode()">Send sign-in code</button>
+      <div class="login-msg" id="email-msg"></div>
+    </div>
+
+    <!-- Step 2: Enter code from email -->
+    <div class="login-step" id="step-code">
+      <div style="text-align:center; padding: 12px 0;">
+        <div style="font-size: 15px; font-weight: 500; margin-bottom: 8px;">Check your email</div>
+        <div style="font-size: 12px; color: var(--t2);">We sent a 6-digit code to <strong id="sent-email"></strong>.</div>
+      </div>
+      <label class="login-label" for="otp-input">Sign-in code</label>
+      <input class="login-input otp-code-input" id="otp-input" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code">
+      <button class="login-btn" id="otp-btn" onclick="handleVerifyCode()">Continue</button>
+      <div class="login-msg" id="otp-msg"></div>
+      <button class="login-btn" style="background: transparent; color: var(--t2); border: 1px solid var(--b); margin-top: 8px;" onclick="showStep('step-email')">Use a different email</button>
+    </div>
+
+  </div>
+</div>
+
+<script src="env.js"></script>
+<script type="module">
+import { initAuth, sendOtp, verifyOtp } from './js/auth.js';
+
+// Expose to onclick handlers
+window.handleSendCode = handleSendCode;
+window.handleVerifyCode = handleVerifyCode;
+window.showStep = showStep;
+
+let _pendingEmail = null;
+
+// ─── Bootstrap ─────────────────────────────────────────────
+
+async function boot() {
+  const result = await initAuth();
+
+  if (result.status === 'unauthorized') {
+    showMsg('email-msg', 'error', 'This account is not authorized.');
+  }
+  // 'no-session' → stay on email step
+  // 'authenticated' / 'redirecting' → initAuth handles redirect
+}
+
+boot();
+
+// ─── Step 1: Send OTP code ────────────────────────────────
+
+async function handleSendCode() {
+  const input = document.getElementById('email-input');
+  const btn = document.getElementById('email-btn');
+  const email = input.value.trim().toLowerCase();
+
+  if (!email || !email.includes('@')) {
+    showMsg('email-msg', 'error', 'Enter a valid email address.');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+
+  const { error } = await sendOtp(email);
+
+  if (error) {
+    showMsg('email-msg', 'error', error.message);
+    btn.disabled = false;
+    btn.textContent = 'Send sign-in code';
+    return;
+  }
+
+  _pendingEmail = email;
+  document.getElementById('sent-email').textContent = email;
+  showStep('step-code');
+  document.getElementById('otp-input').focus();
+}
+
+// ─── Step 2: Verify OTP code ─────────────────────────────
+
+async function handleVerifyCode() {
+  const code = document.getElementById('otp-input').value.trim();
+  if (code.length !== 6) {
+    showMsg('otp-msg', 'error', 'Enter the 6-digit code.');
+    return;
+  }
+
+  const btn = document.getElementById('otp-btn');
+  btn.disabled = true;
+
+  const { error } = await verifyOtp(_pendingEmail, code);
+
+  if (error) {
+    showMsg('otp-msg', 'error', 'Invalid or expired code. Try again.');
+    btn.disabled = false;
+    return;
+  }
+
+  // OTP verified — session is now active. Re-run initAuth for role check.
+  const result = await initAuth();
+
+  if (result.status === 'authenticated' || result.status === 'redirecting') {
+    window.location.href = '/index.html';
+  } else if (result.status === 'unauthorized') {
+    showMsg('otp-msg', 'error', 'This account is not authorized.');
+    btn.disabled = false;
+  }
+}
+
+// ─── Helpers ──────────────────────────────────────────────
+
+function showStep(id) {
+  document.querySelectorAll('.login-step').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function showMsg(id, type, text) {
+  const el = document.getElementById(id);
+  el.className = 'login-msg ' + type;
+  el.textContent = text;
+}
+
+// Allow Enter key on inputs
+document.getElementById('email-input').addEventListener('keydown', e => { if (e.key === 'Enter') handleSendCode(); });
+document.getElementById('otp-input').addEventListener('keydown', e => { if (e.key === 'Enter') handleVerifyCode(); });
+</script>
+</body>
+</html>
