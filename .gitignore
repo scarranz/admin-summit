@@ -2,3 +2,9 @@ env.js
 .env
 .DS_Store
 node_modules/
+
+# Seed data — contains sensitive payroll/revenue figures
+payroll_data.json
+revenue_data.json
+expense_data_cells.json
+fx_rates.json
