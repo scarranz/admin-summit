@@ -771,13 +771,21 @@ function confirmAddLineItem() {
 
   const monthKey = `${year}-${String(month).padStart(2, '0')}`;
 
-  // Add sub-category to bucket if new
+  // Check if line already exists
+  const existingLine = getLine(name);
+  if (existingLine) {
+    closeAddLineModal();
+    showInfoModal('Line item already exists', name, 'This line item is already in the table. Close this and click its cells directly to edit values.');
+    return;
+  }
+
+  // Add sub-category to bucket
   if (!bucket.subs.includes(name)) {
     bucket.subs.push(name);
     SUB_TO_BUCKET[name] = bucket.name;
   }
 
-  // Get or create the line
+  // Create the line
   let line = getLine(name);
   if (!line) {
     line = { name: name, monthly: {}, year_totals: {}, grand_total: 0, projectedMonths: [] };
@@ -802,8 +810,8 @@ function confirmAddLineItem() {
   } else {
     // Refuse if cell already has a value
     if (line.monthly[monthKey] && line.monthly[monthKey] > 0) {
-      alert(`${name} already has $${line.monthly[monthKey].toFixed(2)} for ${monthKey}. To change it, close this modal and click the cell directly to edit.`);
-      amountInput.focus();
+      closeAddLineModal();
+      showInfoModal('Cell already has a value', `$${line.monthly[monthKey].toFixed(2)} in ${monthKey}`, 'Close this and click the cell directly to edit its value.');
       return;
     }
 
@@ -1509,6 +1517,30 @@ async function confirmDeleteLine() {
   }
 }
 
+// ─── Info modal (styled like delete confirm) ───
+
+function showInfoModal(title, detail, message) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'infoModal';
+  overlay.innerHTML = `
+    <div class="modal-card" style="width:340px; text-align:center;">
+      <div style="font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--t3); font-weight:500; margin-bottom:14px;">${title}</div>
+      <div style="font-size:14px; color:var(--t); margin-bottom:6px; font-weight:500;">${detail}</div>
+      <div style="font-size:11px; color:var(--t3); margin-bottom:22px;">${message}</div>
+      <div style="display:flex; justify-content:center;">
+        <button class="btn btn-outline btn-sm" onclick="window._closeInfoModal()">OK</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) window._closeInfoModal(); });
+}
+
+function closeInfoModal() {
+  const modal = document.getElementById('infoModal');
+  if (modal) modal.remove();
+}
+
 // ─── Expose to window for onclick handlers ───
 
 window._toggleBucketCollapsed = toggleBucketCollapsed;
@@ -1521,6 +1553,7 @@ window._editExpCell = editExpCell;
 window._deleteExpenseLine = deleteExpenseLine;
 window._closeDeleteModal = closeDeleteModal;
 window._confirmDeleteLine = confirmDeleteLine;
+window._closeInfoModal = closeInfoModal;
 window._addExpenseLineItem = addExpenseLineItem;
 window._closeAddLineModal = closeAddLineModal;
 window._confirmAddLineItem = confirmAddLineItem;
