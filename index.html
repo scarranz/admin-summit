@@ -7,65 +7,331 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-<style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-html, body {
-  height: 100%;
-  font-family: 'Jost', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: #fafaf8;
-  color: #1a1a18;
-  font-size: 13px;
-  -webkit-font-smoothing: antialiased;
-}
-.loading-wrap {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 12px;
-}
-.loading-wrap .brand {
-  font-size: 24px;
-  font-weight: 400;
-  letter-spacing: 0.05em;
-}
-.loading-wrap .status {
-  font-size: 12px;
-  color: #6b6860;
-}
-.loading-wrap .error {
-  color: #c0392b;
-  font-size: 12px;
-}
-.logout-btn {
-  margin-top: 8px;
-  padding: 8px 24px;
-  font-family: 'Jost', sans-serif;
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  color: #6b6860;
-  background: transparent;
-  border: 1px solid #e8e5e0;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: opacity 0.15s;
-}
-.logout-btn:hover { opacity: 0.7; }
-</style>
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="css/tables.css">
+<link rel="stylesheet" href="css/charts.css">
+<link rel="stylesheet" href="css/components.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
-<div class="loading-wrap">
+<!-- ─── Loading overlay ─── -->
+<div class="loading-wrap" id="loadingWrap">
   <div class="brand">Summit</div>
+  <div class="loading-spinner"></div>
   <div class="status" id="status">Authenticating...</div>
-  <button class="logout-btn" id="logout-btn" style="display:none;">Sign out</button>
 </div>
+
+<!-- ─── App shell (hidden until authenticated) ─── -->
+<div class="app" id="appShell" style="display:none;">
+
+  <!-- ─── Sidebar ─── -->
+  <aside class="sidebar">
+    <div class="sb-brand">
+      <div class="sb-brand-name">Summit</div>
+      <div class="sb-brand-sub">Admin Portal</div>
+    </div>
+
+    <nav class="sb-nav">
+      <div class="nav-item" data-page="overview" onclick="window._nav('overview')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+        Overview
+      </div>
+      <div class="nav-item" data-page="revenue" onclick="window._nav('revenue')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/></svg>
+        Revenue
+      </div>
+      <div class="nav-section">
+        <div class="nav-parent open" id="exp-parent" onclick="window._toggleExpenses()">
+          <div class="nav-parent-left">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M19 17v2a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2"/><polyline points="9 11 12 14 17 9"/></svg>
+            Expenses
+          </div>
+          <span class="nav-chevron">▾</span>
+        </div>
+        <div class="nav-children">
+          <div class="nav-child" data-page="payroll" onclick="window._nav('payroll')">
+            <span>Payroll</span>
+            <span class="solo-badge">Solo</span>
+          </div>
+          <div class="nav-child" data-page="office" onclick="window._nav('office')">
+            <span>Office Expenses</span>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <div class="sb-foot">
+      <div class="sb-user-switcher">
+        <div class="sb-user-info">
+          <span class="sb-dot"></span>
+          <div>
+            <div class="sb-user-name" id="sbUserName">—</div>
+            <div class="sb-user-role" id="sbUserRole">—</div>
+          </div>
+        </div>
+      </div>
+      <button class="sb-signout-btn" id="signOutBtn">Sign out</button>
+    </div>
+  </aside>
+
+  <!-- ─── Main content ─── -->
+  <div class="main">
+
+    <!-- ═══ OVERVIEW ═══ -->
+    <section class="page" id="page-overview">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Overview</div>
+          <div class="page-sub">Operating margin · Revenue minus all expenses (USD)</div>
+        </div>
+        <div class="page-actions">
+          <button class="btn btn-outline btn-sm" onclick="window._expandAllOvYears()">Expand all years</button>
+          <button class="btn btn-outline btn-sm" onclick="window._collapseAllOvYears()">Collapse all</button>
+        </div>
+      </div>
+      <div class="rev-projection" id="ov-kpis"></div>
+      <div class="rev-chart-card">
+        <div class="rev-chart-header">
+          <div class="rev-chart-title">Revenue, Expenses, Op Income & Margin</div>
+          <div class="rev-chart-toggles">
+            <select class="chart-range-select" id="ovRangeSelect" onchange="window._setOvChartRange(this.value)">
+              <option value="ytd">Year to date</option>
+              <option value="6m">Last 6 months</option>
+              <option value="12m" selected>Last 12 months</option>
+              <option value="24m">Last 24 months</option>
+              <option value="2026">2026</option>
+              <option value="2025">2025</option>
+              <option value="2024">2024</option>
+              <option value="all">All time</option>
+            </select>
+            <div class="toggle-group" id="ovSeriesToggle">
+              <button class="toggle-btn active" data-series="revenue" onclick="window._toggleOvSeries('revenue')">Revenue</button>
+              <button class="toggle-btn active" data-series="expenses" onclick="window._toggleOvSeries('expenses')">Expenses</button>
+              <button class="toggle-btn active" data-series="opIncome" onclick="window._toggleOvSeries('opIncome')">Op Income</button>
+              <button class="toggle-btn active" data-series="margin" onclick="window._toggleOvSeries('margin')">Margin</button>
+            </div>
+            <div class="toggle-group" id="ovGranToggle">
+              <button class="toggle-btn active" data-gran="monthly" onclick="window._setOvGranularity('monthly')">Monthly</button>
+              <button class="toggle-btn" data-gran="yearly" onclick="window._setOvGranularity('yearly')">Yearly</button>
+            </div>
+          </div>
+        </div>
+        <div class="rev-chart-body"><canvas id="ovChart"></canvas></div>
+      </div>
+      <div class="rev-table-wrap" style="margin-top: 20px;">
+        <div class="rev-table-scroll">
+          <table class="rev-tbl" id="ovTable">
+            <thead id="ovTableHead"></thead>
+            <tbody id="ovTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ REVENUE ═══ -->
+    <section class="page" id="page-revenue">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Revenue</div>
+          <div class="page-sub" id="rev-subtitle">Fee income by bank and account</div>
+        </div>
+      </div>
+      <div class="rev-projection" id="rev-kpis"></div>
+      <div class="bank-filter">
+        <span class="bank-filter-label">Show:</span>
+        <div class="bank-filter-pills" id="bankFilterPills"></div>
+        <button class="inactive-link" onclick="window._toggleShowInactive()" id="hiddenToggleBtn">Show inactive</button>
+        <button class="inactive-link" onclick="window._projectRevenueRestOfYear()" style="margin-left: 12px;">Projection</button>
+        <button class="inactive-link" onclick="window._clearRevenueProjections()" id="clearProjBtn" style="margin-left: 12px; display:none;">Clear projections</button>
+      </div>
+      <div class="rev-table-wrap">
+        <div class="rev-table-scroll">
+          <table class="rev-tbl" id="revenueTable">
+            <thead id="revenueHead"></thead>
+            <tbody id="revenueBody"></tbody>
+            <tfoot id="revenueFoot"></tfoot>
+          </table>
+        </div>
+      </div>
+      <div class="rev-chart-card">
+        <div class="rev-chart-header">
+          <div class="rev-chart-title">Revenue over time</div>
+          <div class="rev-chart-toggles">
+            <select class="chart-range-select" id="rangeSelect" onchange="window._setChartRange(this.value)">
+              <option value="ytd">Year to date</option>
+              <option value="6m">Last 6 months</option>
+              <option value="12m" selected>Last 12 months</option>
+              <option value="2026">2026</option>
+              <option value="2025">2025</option>
+              <option value="2024">2024</option>
+              <option value="2023">2023</option>
+              <option value="all">All time</option>
+            </select>
+            <div class="toggle-group" id="granToggle">
+              <button class="toggle-btn active" data-gran="monthly" onclick="window._setGranularity('monthly')">Monthly</button>
+              <button class="toggle-btn" data-gran="yearly" onclick="window._setGranularity('yearly')">Yearly</button>
+            </div>
+            <div class="toggle-group" id="typeToggle">
+              <button class="toggle-btn" data-type="line" onclick="window._setChartType('line')">Line</button>
+              <button class="toggle-btn active" data-type="bar" onclick="window._setChartType('bar')">Bar</button>
+            </div>
+          </div>
+        </div>
+        <div class="rev-chart-body"><canvas id="revenueChart"></canvas></div>
+      </div>
+    </section>
+
+    <!-- ═══ PAYROLL ═══ -->
+    <section class="page" id="page-payroll">
+      <div class="page-header">
+        <div>
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div class="page-title">Payroll</div>
+            <span class="badge badge-warn" style="font-size: 9px; padding: 3px 10px; letter-spacing: 0.08em;">Solo · you only</span>
+          </div>
+          <div class="page-sub">All amounts in MXN</div>
+        </div>
+        <div class="page-actions">
+          <button class="btn btn-outline btn-sm" onclick="window._expandAllYearsPayroll()">Expand all years</button>
+          <button class="btn btn-outline btn-sm" onclick="window._collapseAllYearsPayroll()">Collapse all</button>
+        </div>
+      </div>
+      <div class="rev-projection" id="pay-kpis"></div>
+      <div class="bank-filter">
+        <span class="bank-filter-label">&nbsp;</span>
+        <div class="bank-filter-pills"></div>
+        <button class="inactive-link" onclick="window._togglePayrollShowInactive()" id="payHiddenToggleBtn">Show inactive</button>
+      </div>
+      <div class="rev-table-wrap">
+        <div class="rev-table-scroll">
+          <table class="rev-tbl" id="payrollTable">
+            <thead id="payrollHead"></thead>
+            <tbody id="payrollBody"></tbody>
+            <tfoot id="payrollFoot"></tfoot>
+          </table>
+        </div>
+      </div>
+      <div class="rev-chart-card">
+        <div class="rev-chart-header">
+          <div class="rev-chart-title" id="payChartTitle">Payroll over time · MXN</div>
+          <div class="rev-chart-toggles">
+            <select class="chart-range-select" id="payRangeSelect" onchange="window._setPayChartRange(this.value)">
+              <option value="ytd">Year to date</option>
+              <option value="6m">Last 6 months</option>
+              <option value="12m" selected>Last 12 months</option>
+              <option value="2026">2026</option>
+              <option value="2025">2025</option>
+              <option value="2024">2024</option>
+              <option value="2023">2023</option>
+              <option value="all">All time</option>
+            </select>
+            <div class="toggle-group" id="payMetricToggle">
+              <button class="toggle-btn active" data-metric="amount" onclick="window._setPayMetric('amount')">Payroll</button>
+              <button class="toggle-btn" data-metric="ratio" onclick="window._setPayMetric('ratio')">% Revenue</button>
+            </div>
+            <div class="toggle-group" id="payGranToggle">
+              <button class="toggle-btn active" data-gran="monthly" onclick="window._setPayGranularity('monthly')">Monthly</button>
+              <button class="toggle-btn" data-gran="yearly" onclick="window._setPayGranularity('yearly')">Yearly</button>
+            </div>
+            <div class="toggle-group" id="payTypeToggle">
+              <button class="toggle-btn" data-type="line" onclick="window._setPayChartType('line')">Line</button>
+              <button class="toggle-btn active" data-type="bar" onclick="window._setPayChartType('bar')">Bar</button>
+            </div>
+          </div>
+        </div>
+        <div class="rev-chart-body"><canvas id="payrollChart"></canvas></div>
+      </div>
+    </section>
+
+    <!-- ═══ OFFICE EXPENSES ═══ -->
+    <section class="page" id="page-office">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Office Expenses</div>
+          <div class="page-sub">All amounts in USD · categorized by type</div>
+        </div>
+        <div class="page-actions">
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('amexUploadInput').click()">↑ Upload Amex</button>
+          <input type="file" id="amexUploadInput" style="display:none;" accept=".csv,.xlsx,.xls" onchange="window._handleAmexUpload(event)">
+        </div>
+      </div>
+      <div class="rev-projection" id="exp-kpis"></div>
+      <div class="bank-filter">
+        <span class="bank-filter-label">&nbsp;</span>
+        <div class="bank-filter-pills" id="expFilterPills"></div>
+        <button class="inactive-link" onclick="window._toggleExpShowInactive()" id="expHiddenToggleBtn">Show inactive</button>
+        <button class="inactive-link" onclick="window._projectOfficeExpensesRestOfYear()" style="margin-left: 12px;">Projection</button>
+        <button class="inactive-link" onclick="window._clearOfficeExpenseProjections()" id="expClearProjBtn" style="margin-left: 12px; display:none;">Clear projections</button>
+        <button class="inactive-link" onclick="window._toggleFxEditor()" id="fxToggleBtn" style="margin-left: 12px;">USD/MXN rates</button>
+        <button class="inactive-link" onclick="window._addExpenseLineItem()" style="margin-left: 12px;">+ Add line item</button>
+      </div>
+      <div id="fxEditorWrap" style="display:none; margin-top: 12px; margin-bottom: 12px;">
+        <div class="fx-editor-card">
+          <div class="fx-editor-header">
+            <div>
+              <div class="fx-editor-title">USD/MXN end-of-month rates</div>
+              <div class="fx-editor-sub">Used to convert payroll (MXN) to USD for operating margin calculations. Click any cell to edit.</div>
+            </div>
+          </div>
+          <div class="fx-editor-table-wrap">
+            <table class="fx-editor-table" id="fxEditorTable">
+              <thead id="fxEditorHead"></thead>
+              <tbody id="fxEditorBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="rev-table-wrap">
+        <div class="rev-table-scroll">
+          <table class="rev-tbl" id="expCategoryTable">
+            <thead id="expCategoryHead"></thead>
+            <tbody id="expCategoryBody"></tbody>
+            <tfoot id="expCategoryFoot"></tfoot>
+          </table>
+        </div>
+      </div>
+      <div class="rev-chart-card">
+        <div class="rev-chart-header">
+          <div class="rev-chart-title">Total monthly expenses</div>
+          <div class="rev-chart-toggles">
+            <select class="chart-range-select" id="expRangeSelect" onchange="window._setExpChartRange(this.value)">
+              <option value="ytd">Year to date</option>
+              <option value="6m">Last 6 months</option>
+              <option value="12m" selected>Last 12 months</option>
+              <option value="2026">2026</option>
+              <option value="2025">2025</option>
+              <option value="2024">2024</option>
+              <option value="all">All time</option>
+            </select>
+            <div class="toggle-group" id="expGranToggle">
+              <button class="toggle-btn active" data-gran="monthly" onclick="window._setExpGranularity('monthly')">Monthly</button>
+              <button class="toggle-btn" data-gran="yearly" onclick="window._setExpGranularity('yearly')">Yearly</button>
+            </div>
+            <div class="toggle-group" id="expTypeToggle">
+              <button class="toggle-btn" data-type="line" onclick="window._setExpChartType('line')">Line</button>
+              <button class="toggle-btn active" data-type="bar" onclick="window._setExpChartType('bar')">Bar</button>
+            </div>
+          </div>
+        </div>
+        <div class="rev-chart-body"><canvas id="expenseChart"></canvas></div>
+      </div>
+    </section>
+
+  </div><!-- .main -->
+</div><!-- .app -->
 
 <script src="env.js"></script>
 <script type="module">
 import { initAuth, getCurrentUser, signOut } from './js/auth.js';
+import { loadFxRates } from './js/fx.js';
+import { initNav, registerPageLoader } from './js/nav.js';
+import { loadRevenuePage } from './js/revenue.js';
+import { loadPayrollPage } from './js/payroll.js';
+import { loadOfficePage } from './js/office.js';
+import { loadOverviewPage } from './js/overview.js';
 
 const statusEl = document.getElementById('status');
 
@@ -73,38 +339,44 @@ async function boot() {
   const result = await initAuth();
 
   switch (result.status) {
-    case 'authenticated':
-      const user = getCurrentUser();
-      statusEl.textContent = `Signed in as ${user.name} (${user.label})`;
-      document.getElementById('logout-btn').style.display = '';
+    case 'authenticated': {
+      statusEl.textContent = 'Loading data...';
+
+      // Load FX rates first (needed by all pages)
+      await loadFxRates();
+
+      // Register page loaders
+      registerPageLoader('overview', loadOverviewPage);
+      registerPageLoader('revenue', loadRevenuePage);
+      registerPageLoader('payroll', loadPayrollPage);
+      registerPageLoader('office', loadOfficePage);
+
+      // Show app, hide loading
+      document.getElementById('loadingWrap').style.display = 'none';
+      document.getElementById('appShell').style.display = '';
+
+      // Initialize navigation (sets up sidebar, navigates to default page)
+      initNav();
+
+      // Auto-logout after 2 hours of inactivity
       startInactivityTimer();
-      // Phase 2: load the full app shell here
       break;
+    }
     case 'unauthorized':
       statusEl.className = 'error';
       statusEl.textContent = 'This account is not authorized.';
       break;
     case 'no-session':
-      // initAuth already redirects to login.html
       break;
   }
 }
 
 boot();
 
-// ─── Logout ──────────────────────────────────────────────
-document.getElementById('logout-btn').addEventListener('click', () => signOut());
-
-// ─── Auto-logout after 2 hours of inactivity ────────────
 function startInactivityTimer() {
-  const TIMEOUT = 2 * 60 * 60 * 1000; // 2 hours
+  const TIMEOUT = 2 * 60 * 60 * 1000;
   let timer = setTimeout(() => signOut(), TIMEOUT);
-
-  const reset = () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => signOut(), TIMEOUT);
-  };
-
+  const reset = () => { clearTimeout(timer); timer = setTimeout(() => signOut(), TIMEOUT); };
   for (const evt of ['mousemove', 'keydown', 'scroll', 'click', 'touchstart']) {
     document.addEventListener(evt, reset, { passive: true });
   }

@@ -1,1 +1,22 @@
-/* Phase 1 placeholder — will be populated from prototype CSS */
+.rev-chart-card { background: var(--w); border: 1px solid var(--b); border-radius: 12px; padding: 18px 22px 22px; margin-top: 16px; }
+.rev-chart-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.rev-chart-title { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 500; color: var(--t3); }
+.rev-chart-toggles { display: flex; gap: 10px; align-items: center; }
+.rev-chart-body { position: relative; height: 280px; }
+
+.chart-range-select {
+  padding: 5px 28px 5px 12px; border-radius: 16px; font-size: 11px; font-weight: 500;
+  letter-spacing: 0.02em; background-color: var(--off);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='none' stroke='%236b6860' stroke-width='1.5' d='M1 1l4 4 4-4'/></svg>");
+  background-repeat: no-repeat; background-position: right 10px center;
+  border: 0.5px solid var(--b); color: var(--t); cursor: pointer;
+  font-family: 'Jost', sans-serif; appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  transition: border-color 0.15s;
+}
+.chart-range-select:hover { border-color: var(--t2); }
+.chart-range-select:focus { outline: none; border-color: var(--t); }
+
+.toggle-group { display: inline-flex; background: var(--off); border: 0.5px solid var(--b); border-radius: 16px; padding: 2px; }
+.toggle-btn { padding: 4px 12px; border-radius: 14px; font-size: 10px; font-weight: 500; letter-spacing: 0.04em; background: transparent; border: none; color: var(--t2); cursor: pointer; font-family: 'Jost', sans-serif; transition: all 0.15s; }
+.toggle-btn:hover { color: var(--t); }
+.toggle-btn.active { background: var(--t); color: #fff; }

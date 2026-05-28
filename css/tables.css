@@ -1,1 +1,99 @@
-/* Phase 1 placeholder — will be populated from prototype CSS */
+.rev-table-wrap { background: var(--w); border: 1px solid var(--b); border-radius: 12px; overflow: hidden; }
+.rev-table-scroll { overflow-x: auto; overflow-y: visible; max-width: 100%; }
+.rev-tbl { border-collapse: separate; border-spacing: 0; font-size: 12px; width: max-content; min-width: 100%; }
+.rev-tbl th, .rev-tbl td { padding: 10px 12px; border-bottom: 0.5px solid var(--bl); white-space: nowrap; background: var(--w); }
+.rev-tbl thead th { background: var(--off); border-bottom: 1px solid var(--b); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 500; color: var(--t3); }
+.rev-tbl tbody tr:hover td { background: var(--off); }
+.rev-tbl tbody tr:hover td.sticky-col { background: var(--off); }
+.rev-tbl .num { text-align: right; font-variant-numeric: tabular-nums; }
+.rev-tbl .display-num { font-family: 'Jost', sans-serif; font-size: 14px; font-weight: 500; }
+
+.sticky-col { position: sticky; left: 0; z-index: 2; background: var(--w); }
+.sticky-col-2 { position: sticky; left: 32px; z-index: 2; background: var(--w); border-right: 1px solid var(--b); min-width: 200px; }
+.rev-tbl thead .sticky-col, .rev-tbl thead .sticky-col-2 { background: var(--off); z-index: 3; }
+
+.year-th { cursor: pointer; user-select: none; color: var(--blue); background: var(--bluel) !important; border-left: 1px solid var(--b); border-right: 1px solid var(--b); min-width: 90px; }
+.year-th:hover { filter: brightness(0.96); }
+.year-chev { display: inline-block; transition: transform 0.2s; font-size: 9px; margin-right: 4px; }
+.year-chev.open { transform: rotate(90deg); }
+.month-th { font-size: 9px !important; min-width: 70px; color: var(--t3) !important; }
+.year-divider-left { border-left: 1px solid var(--b); }
+.year-divider-right { border-right: 1px solid var(--b); }
+
+.year-total-cell { background: var(--bluel) !important; font-weight: 600; color: var(--blue); border-left: 1px solid var(--b); border-right: 1px solid var(--b); }
+.grand-total-th { background: var(--navyl) !important; color: var(--navy); font-weight: 700; min-width: 110px; border-left: 1px solid var(--b); }
+.grand-total-cell { background: var(--navyl) !important; border-left: 1px solid var(--b); }
+
+.bank-row td { background: var(--off); font-weight: 600; cursor: pointer; }
+.bank-row td.sticky-col, .bank-row td.sticky-col-2 { background: var(--off); }
+.bank-row:hover td { background: var(--bl); }
+.bank-row:hover td.sticky-col, .bank-row:hover td.sticky-col-2 { background: var(--bl); }
+.bank-chev { display: inline-block; transition: transform 0.2s; font-size: 9px; color: var(--t3); margin-right: 4px; }
+.bank-chev.open { transform: rotate(90deg); }
+
+.acct-row td.sticky-col-2 { padding-left: 28px; font-size: 11px; color: var(--t2); font-weight: 400; }
+.acct-row td { font-size: 11px; color: var(--t2); }
+
+.total-row td { background: var(--navyl); font-weight: 700; border-top: 2px solid var(--navy); }
+.total-row td.sticky-col, .total-row td.sticky-col-2 { background: var(--navyl); }
+.total-row .display-num { color: var(--navy); }
+
+.yoy-row td { background: var(--off); font-size: 11px; font-weight: 500; }
+.yoy-row td.sticky-col, .yoy-row td.sticky-col-2 { background: var(--off); color: var(--t3); font-style: italic; }
+.yoy-pos { color: var(--green); }
+.yoy-neg { color: var(--red); }
+.yoy-na { color: var(--t3); }
+
+.margin-row td { background: var(--off); font-size: 10px; font-variant-numeric: tabular-nums; color: var(--t2); border-bottom: 0.5px solid var(--bl); }
+.margin-row td.sticky-col, .margin-row td.sticky-col-2 { background: var(--off); }
+.margin-row .sticky-col-2 { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 500; color: var(--t3); }
+.margin-good { color: var(--green); }
+.margin-ok { color: var(--t2); }
+.margin-bad { color: var(--red); }
+
+.fx-row td { background: var(--off); font-size: 10px; color: var(--t3); font-variant-numeric: tabular-nums; border-bottom: 0.5px solid var(--bl); }
+.fx-row td.sticky-col, .fx-row td.sticky-col-2 { background: var(--off); }
+.fx-row .sticky-col-2 { font-size: 10px; color: var(--t3); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 500; }
+.fx-rate-display { color: var(--t3); font-weight: 400; }
+.total-usd-row td { background: var(--bl); color: var(--t); border-top: 0.5px solid var(--b); }
+.total-usd-row td.sticky-col, .total-usd-row td.sticky-col-2 { background: var(--bl); }
+.total-usd-row .sticky-col-2 { font-weight: 600; }
+.usd-cell { color: var(--t); }
+
+.bonus-th { background: var(--amberl) !important; color: var(--amber) !important; border-left: 0.5px solid var(--b); }
+.bonus-cell { background: var(--amberl) !important; color: var(--amber); font-weight: 500; border-left: 0.5px solid var(--b); }
+.acct-inactive .bonus-cell { opacity: 0.6; }
+
+.bank-ML { color: var(--blue); }
+.bank-JPM { color: var(--navy); }
+.bank-UBS { color: var(--slate); }
+.bank-GS { color: var(--indigo); }
+.bank-IBKR { color: var(--gold); }
+
+.editable-cell { cursor: cell; position: relative; transition: background-color 0.1s; }
+.editable-cell:hover { background: var(--bluel) !important; box-shadow: inset 0 0 0 1px var(--blue); }
+.editable-cell.editing { padding: 0 !important; background: var(--w) !important; box-shadow: inset 0 0 0 2px var(--blue); }
+.cell-input { width: 100%; height: 100%; border: none; outline: none; padding: 11px 12px; font-family: 'Jost', sans-serif; font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; background: transparent; color: var(--t); -moz-appearance: textfield; }
+.cell-input::-webkit-outer-spin-button, .cell-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+.projected-cell { color: #9a9a9a !important; font-style: italic; background: #f3f3f1 !important; position: relative; }
+.projected-cell::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: repeating-linear-gradient(-45deg, transparent, transparent 5px, rgba(0,0,0,0.025) 5px, rgba(0,0,0,0.025) 6px); pointer-events: none; }
+.projected-cell:hover { background: var(--bluel) !important; }
+
+.acct-row.acct-inactive td { opacity: 0.55; font-style: italic; }
+.acct-row.acct-inactive td.sticky-col-2 { color: var(--t3); }
+
+.employee-header { cursor: pointer; user-select: none; }
+.employee-chev { font-size: 9px; color: var(--t3); margin-right: 4px; }
+
+.ov-total-exp:hover td { background: var(--off); }
+.ov-exp-chev { display: inline-block; font-size: 9px; color: var(--t3); margin-right: 4px; }
+.ov-muted-cell { color: var(--t2); }
+.ov-neg { color: var(--red); }
+.ov-oi-row td { background: var(--bl); }
+.ov-oi-row td.sticky-col, .ov-oi-row td.sticky-col-2 { background: var(--bl); }
+
+.bucket-row td { background: var(--off); font-weight: 600; cursor: pointer; }
+.bucket-row td.sticky-col, .bucket-row td.sticky-col-2 { background: var(--off); }
+.bucket-row:hover td { background: var(--bl); }
+.bucket-row:hover td.sticky-col, .bucket-row:hover td.sticky-col-2 { background: var(--bl); }

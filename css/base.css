@@ -1,1 +1,38 @@
-/* Phase 1 placeholder — will be populated from prototype CSS */
+/* ─── Variables ─── */
+:root {
+  --w: #ffffff;
+  --off: #fafaf8;
+  --b: #e8e5e0;
+  --bl: #f0ede8;
+  --t: #1a1a18;
+  --t2: #6b6860;
+  --t3: #a8a49e;
+  --navy: #1e2d3d;     --navyl: #edf1f5;
+  --green: #2d6a4f;    --greenl: #eaf4ef;
+  --red: #c0392b;      --redl: #fdf0ee;
+  --amber: #b7791f;    --amberl: #fef9ec;
+  --gold: #b5967a;     --goldl: #f4ede4;
+  --indigo: #3d3a8c;   --indigol: #eeedf8;
+  --blue: #185fa5;     --bluel: #e6f1fb;
+  --slate: #4a5568;    --slatel: #f0f2f5;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  font-family: 'Jost', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--off);
+  color: var(--t);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--b); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--t3); }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes spin { to { transform: rotate(360deg); } }
