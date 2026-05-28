@@ -189,9 +189,9 @@ function transformSupabaseData(employees, cells) {
     empCells.forEach(c => {
       if (c.year_month.endsWith('-bonus')) {
         const yr = parseInt(c.year_month.split('-')[0]);
-        bonuses[yr] = c.amount_mxn;
+        bonuses[yr] = parseFloat(c.amount_mxn);
       } else {
-        monthly[c.year_month] = c.amount_mxn;
+        monthly[c.year_month] = parseFloat(c.amount_mxn);
       }
     });
 

@@ -169,23 +169,27 @@ function renderOvKpis() {
   const ytdOI = ytdRev - ytdExp;
   const ytdMargin = ytdRev > 0 ? (ytdOI / ytdRev) * 100 : 0;
 
-  // Projection for the full year: YTD + (trailing 3-month average * remaining months)
-  let projRev = ytdRev, projExp = ytdExp;
-  if (lastY === curYear) {
-    const remaining = 12 - lastM;
-    // Average of the last 3 complete months as the run-rate
-    let r3 = 0, e3 = 0, cnt = 0;
-    for (let i = 0; i < 3; i++) {
-      let m = lastM - i, y = lastY;
-      if (m < 1) { m += 12; y -= 1; }
-      r3 += ovRevenueMonth(y, m);
-      e3 += ovExpenseMonth(y, m);
-      cnt++;
+  // Projection: sum all 12 months using the same data as the table
+  // This uses actual values for complete months and projected values
+  // (from revenue/office projection) for future months
+  let projRev = 0, projExp = 0;
+  for (let m = 1; m <= 12; m++) {
+    const rev = ovRevenueMonth(curYear, m);
+    const exp = ovExpenseMonth(curYear, m);
+    if (m <= lastM) {
+      // Complete month — use actuals
+      projRev += rev;
+      projExp += exp;
+    } else {
+      // Future month — use latest complete month as run-rate if no projected data
+      if (rev > 0 || exp > 0) {
+        projRev += rev;
+        projExp += exp;
+      } else {
+        projRev += ovRevenueMonth(lastY, lastM);
+        projExp += ovExpenseMonth(lastY, lastM);
+      }
     }
-    const rRate = cnt > 0 ? r3 / cnt : 0;
-    const eRate = cnt > 0 ? e3 / cnt : 0;
-    projRev += rRate * remaining;
-    projExp += eRate * remaining;
   }
   const projOI = projRev - projExp;
   const projMargin = projRev > 0 ? (projOI / projRev) * 100 : 0;
@@ -443,10 +447,16 @@ function renderOvTable() {
   const YEARS_OV = [2022, 2023, 2024, 2025, 2026];
   const MONTH_NAMES_OV = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-  // ─── Per-cell helpers (returns USD numbers; null for "---") ───
-  function cellRev(y, m) { return m ? ovRevenueMonth(y, m) : ovRevenueYear(y); }
-  function cellOffice(y, m) { return m ? expTotalMonth(y, m) : expTotalYear(y); }
-  function cellPayroll(y, m) { return m ? ovPayrollUsdMonth(y, m) : ovPayrollUsdYear(y); }
+  // ─── Per-cell helpers ───
+  // Year totals are computed by summing 12 months to stay consistent with monthly columns
+  function sumYear(monthFn, y) {
+    let s = 0;
+    for (let m = 1; m <= 12; m++) s += monthFn(y, m);
+    return s;
+  }
+  function cellRev(y, m) { return m ? ovRevenueMonth(y, m) : sumYear(ovRevenueMonth, y); }
+  function cellOffice(y, m) { return m ? expTotalMonth(y, m) : sumYear(expTotalMonth, y); }
+  function cellPayroll(y, m) { return m ? ovPayrollUsdMonth(y, m) : sumYear(ovPayrollUsdMonth, y); }
   function cellTotalExp(y, m) { return cellOffice(y, m) + cellPayroll(y, m); }
   function cellOI(y, m) { return cellRev(y, m) - cellTotalExp(y, m); }
   function cellMargin(y, m) {

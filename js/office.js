@@ -1,6 +1,6 @@
 // Office Expenses page module
 import { supabase } from './supabase-client.js';
-import { YEARS, MONTH_NAMES, MONTH_NAMES_FULL, fmtUsd, fmtUsdShort, showToast, yearMonthKey } from './utils.js';
+import { YEARS, MONTH_NAMES, MONTH_NAMES_FULL, fmtUsd, fmtUsdShort, showToast, showInfoModal, showConfirmModal, yearMonthKey } from './utils.js';
 import { recomputeLineTotals } from './projection.js';
 import { toggleFxEditor, renderFxEditor, FX_RATES } from './fx.js';
 
@@ -133,6 +133,43 @@ async function loadExpenseData() {
   EXPENSE_DATA = EXPENSE_LINES;
   EXPENSE_CATEGORIES = computeExpenseCategories();
   _loaded = true;
+}
+
+// ─── Learned patterns ───
+
+async function loadLearnedPatterns() {
+  try {
+    const { data, error } = await supabase.from('amex_patterns').select('id, pattern, line_name');
+    if (error) throw error;
+    learnedPatterns = data || [];
+  } catch (err) {
+    console.warn('Could not load learned patterns (table may not exist yet):', err.message);
+    learnedPatterns = [];
+  }
+}
+
+async function learnPattern(patternOrDesc, lineName) {
+  // patternOrDesc can be a pre-extracted keyword or a raw description
+  // If it looks like a raw description (lowercase or long), extract keyword
+  let keyword = patternOrDesc;
+  if (keyword !== keyword.toUpperCase() || keyword.split(/\s+/).length > 3) {
+    const words = patternOrDesc.trim().split(/\s+/).slice(0, 2);
+    keyword = words.join(' ').toUpperCase();
+  }
+  if (!keyword) return;
+
+  try {
+    const { data, error } = await supabase.from('amex_patterns')
+      .insert({ pattern: keyword, line_name: lineName })
+      .select('id, pattern, line_name')
+      .single();
+    if (error) throw error;
+    if (data) learnedPatterns.push(data);
+    showToast(`Learned: "${keyword}" \u2192 ${lineName}`, 'success');
+  } catch (err) {
+    console.warn('Failed to save pattern:', err.message);
+    showToast('Failed to save pattern', 'error');
+  }
 }
 
 // ─── Bucket sub-categories ───
@@ -333,20 +370,21 @@ function projectOfficeExpensesRestOfYear() {
   updateExpClearProjBtnVisibility();
 
   if (filled === 0) {
-    alert('Nothing to project — no projectable sub-categories have current-year actuals beyond what is already projected.');
+    showInfoModal('Nothing to project', 'No changes made', 'No projectable sub-categories have current-year actuals beyond what is already projected.');
   }
 }
 
 function clearOfficeExpenseProjections() {
-  if (!confirm('Clear all projected values for office expenses? This keeps all real data intact.')) return;
-  EXPENSE_LINES.forEach(line => {
-    if (!line.projectedMonths || line.projectedMonths.length === 0) return;
-    line.projectedMonths.forEach(key => { delete line.monthly[key]; });
-    line.projectedMonths = [];
-    recomputeLineTotals(line);
+  showConfirmModal('Clear projections', 'Office Expenses', 'This will remove all projected values but keep real data intact.', () => {
+    EXPENSE_LINES.forEach(line => {
+      if (!line.projectedMonths || line.projectedMonths.length === 0) return;
+      line.projectedMonths.forEach(key => { delete line.monthly[key]; });
+      line.projectedMonths = [];
+      recomputeLineTotals(line);
+    });
+    renderOfficeExpenses();
+    updateExpClearProjBtnVisibility();
   });
-  renderOfficeExpenses();
-  updateExpClearProjBtnVisibility();
 }
 
 function hasAnyOfficeProjections() {
@@ -842,6 +880,7 @@ function confirmAddLineItem() {
 // ─── Amex file upload ───
 
 let amexPreviewBuffer = [];
+let learnedPatterns = [];
 
 function handleAmexUpload(event) {
   console.log('[Amex] handleAmexUpload triggered');
@@ -853,7 +892,7 @@ function handleAmexUpload(event) {
   console.log('[Amex] File:', file.name, file.size, 'bytes');
 
   if (typeof window.XLSX === 'undefined') {
-    alert('XLSX library not loaded. Check internet connection and refresh.');
+    showInfoModal('Upload failed', 'Library not loaded', 'The Excel parser could not load. Check your internet connection and refresh the page.');
     event.target.value = '';
     return;
   }
@@ -880,7 +919,7 @@ function handleAmexUpload(event) {
       }
 
       if (parsed.length === 0) {
-        alert('No transactions found. Looked for "Date", "Description", and "Amount" columns. Check the file format.');
+        showInfoModal('No transactions found', file.name, 'Could not find columns labeled "Date", "Description", and "Amount". Make sure you are uploading the correct Amex statement file.');
         event.target.value = '';
         return;
       }
@@ -888,13 +927,13 @@ function handleAmexUpload(event) {
       showAmexPreview(parsed);
     } catch (err) {
       console.error('[Amex] Parse error:', err);
-      alert('Failed to parse file: ' + err.message);
+      showInfoModal('Failed to parse file', file.name, err.message);
     }
     event.target.value = '';
   };
   reader.onerror = (err) => {
     console.error('[Amex] FileReader error:', err);
-    alert('Failed to read file');
+    showInfoModal('Failed to read file', file.name, 'The file could not be read. Please try again.');
   };
   reader.readAsArrayBuffer(file);
 }
@@ -960,11 +999,13 @@ function parseAmexRows(rows) {
 
     const merchant = String(desc).split(/\s{3,}/)[0].trim().slice(0, 50);
 
+    const autoCategory = autoCategorizeAmex(merchant);
     transactions.push({
       date: dateStr,
       description: merchant,
       amount: amount,
-      category: autoCategorizeAmex(merchant),
+      category: autoCategory,
+      originalCategory: autoCategory,
       include: true
     });
   }
@@ -975,6 +1016,11 @@ function parseAmexRows(rows) {
 
 function autoCategorizeAmex(desc) {
   const d = desc.toUpperCase();
+
+  // Check learned patterns first (simple substring match, case-insensitive)
+  for (const lp of learnedPatterns) {
+    if (d.includes(lp.pattern.toUpperCase())) return lp.line_name;
+  }
 
   const patterns = [
     [/BLOOMBERG/, 'Bloomberg'],
@@ -1002,7 +1048,7 @@ function autoCategorizeAmex(desc) {
     if (pat.test(d)) return cat;
   }
 
-  return 'Extras';
+  return null;
 }
 
 // ─── Amex preview modal ───
@@ -1013,12 +1059,29 @@ function showAmexPreview(transactions) {
   const allSubcats = [];
   EXPENSE_BUCKETS.forEach(b => b.subs.forEach(s => allSubcats.push(s)));
 
+  // Count uncategorized rows
+  const uncatCount = transactions.filter(t => t.category === null).length;
+  const uncatNote = uncatCount > 0
+    ? `<span style="color:var(--amber, #d97706); font-weight:500;"> · ${uncatCount} uncategorized</span>`
+    : '';
+
+  // Compute existing data map for duplicate detection
+  const existingData = {};
+  amexPreviewBuffer.forEach(tx => {
+    if (!tx.category) return;
+    const ym = tx.date.slice(0, 7);
+    const line = getLine(tx.category);
+    if (line && line.monthly[ym]) {
+      existingData[`${tx.category}::${ym}`] = line.monthly[ym];
+    }
+  });
+
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
     <div class="modal-card amex-preview-card" onclick="event.stopPropagation()">
       <div class="modal-title">Review Amex import · ${transactions.length} transactions</div>
-      <div class="amex-preview-sub">Auto-categorized based on merchant. Adjust any row before importing. Untick to skip a row.</div>
+      <div class="amex-preview-sub">Auto-categorized based on merchant. Adjust any row before importing. Untick to skip a row.${uncatNote}</div>
 
       <div class="amex-preview-table-wrap">
         <table class="amex-preview-table">
@@ -1046,6 +1109,9 @@ function showAmexPreview(transactions) {
   overlay.addEventListener('click', closeAmexPreview);
   document.body.appendChild(overlay);
 
+  // Store existingData on the buffer for use in rendering
+  amexPreviewBuffer._existingData = existingData;
+
   renderAmexPreviewRows(allSubcats);
 }
 
@@ -1053,18 +1119,36 @@ function renderAmexPreviewRows(allSubcats) {
   const tbody = document.getElementById('amexPreviewBody');
   if (!tbody) return;
 
-  const catOptionsHtml = allSubcats.map(c => `<option value="${c}">${c}</option>`).join('');
+  const existingData = amexPreviewBuffer._existingData || {};
 
   let html = '';
   amexPreviewBuffer.forEach((tx, idx) => {
-    html += `<tr class="${tx.include ? '' : 'amex-row-excluded'}">
+    const isUncat = tx.category === null;
+    const rowCls = !tx.include ? 'amex-row-excluded' : isUncat ? 'amex-row-uncategorized' : '';
+
+    // Check for existing data in the target cell
+    let existingNote = '';
+    if (tx.category) {
+      const ym = tx.date.slice(0, 7);
+      const key = `${tx.category}::${ym}`;
+      if (existingData[key] !== undefined) {
+        existingNote = `<div class="amex-existing" style="font-size:10px; color:#d97706; margin-top:2px;">Current: $${existingData[key].toFixed(2)}</div>`;
+      }
+    }
+
+    // Build placeholder option for uncategorized
+    const placeholderOpt = isUncat ? '<option value="" disabled selected>\u2014 Select \u2014</option>' : '';
+
+    html += `<tr class="${rowCls}">
       <td><input type="checkbox" ${tx.include ? 'checked' : ''} onchange="window._toggleAmexPreviewRow(${idx})"></td>
       <td style="color: var(--t2); font-size: 11px;">${tx.date}</td>
       <td style="font-size: 12px;">${tx.description}</td>
-      <td class="num" style="font-weight: 500;">$${tx.amount.toFixed(2)}</td>
+      <td class="num" style="font-weight: 500;">$${tx.amount.toFixed(2)}${existingNote}</td>
       <td>
         <select class="amex-cat-select" onchange="window._updateAmexPreviewCat(${idx}, this.value)">
+          ${placeholderOpt}
           ${allSubcats.map(c => `<option value="${c}" ${c === tx.category ? 'selected' : ''}>${c}</option>`).join('')}
+          <option value="__new__">+ New line item</option>
         </select>
       </td>
     </tr>`;
@@ -1084,8 +1168,156 @@ function toggleAmexPreviewRow(idx) {
 }
 
 function updateAmexPreviewCat(idx, cat) {
-  amexPreviewBuffer[idx].category = cat;
+  const tx = amexPreviewBuffer[idx];
+
+  if (cat === '__new__') {
+    // Reset dropdown to previous value while modal is open
+    const selects = document.querySelectorAll('#amexPreviewBody .amex-cat-select');
+    if (selects[idx]) selects[idx].value = tx.category || '';
+    showNewLineFromPreview(idx);
+    return;
+  }
+
+  const wasUncategorized = tx.originalCategory === null || tx.originalCategory === 'Extras';
+  tx.category = cat;
   updateAmexPreviewSummary();
+
+  // Re-render to update existing-data notes and styling
+  const allSubcats = [];
+  EXPENSE_BUCKETS.forEach(b => b.subs.forEach(s => allSubcats.push(s)));
+  renderAmexPreviewRows(allSubcats);
+
+  // If originally uncategorized and now assigned a real category, offer to learn
+  if (wasUncategorized && cat) {
+    showLearnPatternModal(tx.description, cat);
+  }
+}
+
+function showLearnPatternModal(description, lineName) {
+  // Extract keyword preview
+  const words = description.trim().split(/\s+/).slice(0, 2);
+  const keyword = words.join(' ').toUpperCase();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'learnPatternModal';
+  overlay.innerHTML = `
+    <div class="modal-card" style="width:360px; text-align:center;" onclick="event.stopPropagation()">
+      <div style="font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--t3); font-weight:500; margin-bottom:14px;">Remember this for future uploads?</div>
+      <div style="font-size:13px; color:var(--t); margin-bottom:6px;"><strong>"${keyword}"</strong> &rarr; <strong>${lineName}</strong></div>
+      <div style="font-size:11px; color:var(--t3); margin-bottom:22px;">Future Amex transactions containing this keyword will auto-categorize.</div>
+      <div style="display:flex; gap:8px; justify-content:center;">
+        <button class="btn btn-outline btn-sm" onclick="window._closeLearnPatternModal()">No</button>
+        <button class="btn btn-primary btn-sm" onclick="window._confirmLearnPattern('${keyword.replace(/'/g, "\\'")}', '${lineName.replace(/'/g, "\\'")}')">Yes</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) window._closeLearnPatternModal(); });
+}
+
+function closeLearnPatternModal() {
+  const modal = document.getElementById('learnPatternModal');
+  if (modal) modal.remove();
+}
+
+async function confirmLearnPattern(keyword, lineName) {
+  closeLearnPatternModal();
+  await learnPattern(keyword, lineName);
+}
+
+function showNewLineFromPreview(txIdx) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'newLineFromPreviewModal';
+  overlay.innerHTML = `
+    <div class="modal-card" style="width:360px;" onclick="event.stopPropagation()">
+      <div class="modal-title">New line item</div>
+
+      <div class="modal-field">
+        <label class="modal-label">Name</label>
+        <input type="text" class="modal-input" id="newPreviewLineName" placeholder="e.g. Internet, Stripe" autocomplete="off">
+      </div>
+
+      <div class="modal-field">
+        <label class="modal-label">Category</label>
+        <div class="modal-bucket-options">
+          ${EXPENSE_BUCKETS.map((b, i) => `
+            <label class="bucket-option">
+              <input type="radio" name="newPreviewBucket" value="${b.name}" ${i === 0 ? 'checked' : ''}>
+              <span>${b.name}</span>
+            </label>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-outline btn-sm" onclick="window._closeNewLineFromPreview()">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="window._confirmNewLineFromPreview(${txIdx})">Create</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) window._closeNewLineFromPreview(); });
+  setTimeout(() => {
+    const inp = document.getElementById('newPreviewLineName');
+    if (inp) inp.focus();
+  }, 0);
+}
+
+function closeNewLineFromPreview() {
+  const modal = document.getElementById('newLineFromPreviewModal');
+  if (modal) modal.remove();
+}
+
+function confirmNewLineFromPreview(txIdx) {
+  const nameInput = document.getElementById('newPreviewLineName');
+  const name = nameInput ? nameInput.value.trim() : '';
+  if (!name) { if (nameInput) nameInput.focus(); return; }
+
+  const bucketRadio = document.querySelector('#newLineFromPreviewModal input[name="newPreviewBucket"]:checked');
+  if (!bucketRadio) return;
+  const bucketName = bucketRadio.value;
+  const bucket = EXPENSE_BUCKETS.find(b => b.name === bucketName);
+  if (!bucket) { closeNewLineFromPreview(); return; }
+
+  // Add sub-category to bucket if not already present
+  if (!bucket.subs.includes(name)) {
+    bucket.subs.push(name);
+    SUB_TO_BUCKET[name] = bucket.name;
+  }
+
+  // Create the line in EXPENSE_LINES if it doesn't exist
+  let line = getLine(name);
+  if (!line) {
+    line = { name: name, monthly: {}, year_totals: {}, grand_total: 0, projectedMonths: [] };
+    EXPENSE_LINES.push(line);
+
+    // Persist new line to Supabase
+    supabase.from('office_expense_lines')
+      .insert({ name: name, bucket: bucketName, is_active: true, display_order: EXPENSE_LINES.length })
+      .select('id')
+      .single()
+      .then(({ data, error }) => {
+        if (!error && data) line._id = data.id;
+      });
+  }
+
+  // Set the transaction's category
+  const tx = amexPreviewBuffer[txIdx];
+  tx.category = name;
+
+  closeNewLineFromPreview();
+
+  // Refresh derived categories
+  EXPENSE_CATEGORIES.length = 0;
+  EXPENSE_CATEGORIES.push(...computeExpenseCategories());
+
+  // Re-render preview rows with updated subcats
+  const allSubcats = [];
+  EXPENSE_BUCKETS.forEach(b => b.subs.forEach(s => allSubcats.push(s)));
+  renderAmexPreviewRows(allSubcats);
+
+  // Offer to learn the pattern
+  showLearnPatternModal(tx.description, name);
 }
 
 function updateAmexPreviewSummary() {
@@ -1093,7 +1325,21 @@ function updateAmexPreviewSummary() {
   if (!el) return;
   const included = amexPreviewBuffer.filter(t => t.include);
   const total = included.reduce((s, t) => s + t.amount, 0);
-  el.innerHTML = `<strong>${included.length}</strong> of ${amexPreviewBuffer.length} selected · total <strong>$${total.toFixed(2)}</strong>`;
+
+  // Count cells that will overwrite existing data
+  const existingData = amexPreviewBuffer._existingData || {};
+  const overwriteKeys = new Set();
+  included.forEach(tx => {
+    if (!tx.category) return;
+    const ym = tx.date.slice(0, 7);
+    const key = `${tx.category}::${ym}`;
+    if (existingData[key] !== undefined) overwriteKeys.add(key);
+  });
+  const overwriteNote = overwriteKeys.size > 0
+    ? ` · <span style="color:#d97706;">${overwriteKeys.size} cell${overwriteKeys.size === 1 ? '' : 's'} will be updated with new values</span>`
+    : '';
+
+  el.innerHTML = `<strong>${included.length}</strong> of ${amexPreviewBuffer.length} selected · total <strong>$${total.toFixed(2)}</strong>${overwriteNote}`;
 }
 
 function closeAmexPreview() {
@@ -1103,7 +1349,7 @@ function closeAmexPreview() {
 }
 
 function commitAmexImport() {
-  const included = amexPreviewBuffer.filter(t => t.include);
+  const included = amexPreviewBuffer.filter(t => t.include && t.category);
   if (included.length === 0) { closeAmexPreview(); return; }
 
   // Aggregate by (category, year-month)
@@ -1450,7 +1696,7 @@ export function renderOfficeExpenses() {
 
 export async function loadOfficePage() {
   if (!_dataLoaded) {
-    await loadExpenseData();
+    await Promise.all([loadExpenseData(), loadLearnedPatterns()]);
     _dataLoaded = true;
   }
   renderOfficeExpenses();
@@ -1517,30 +1763,6 @@ async function confirmDeleteLine() {
   }
 }
 
-// ─── Info modal (styled like delete confirm) ───
-
-function showInfoModal(title, detail, message) {
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.id = 'infoModal';
-  overlay.innerHTML = `
-    <div class="modal-card" style="width:340px; text-align:center;">
-      <div style="font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--t3); font-weight:500; margin-bottom:14px;">${title}</div>
-      <div style="font-size:14px; color:var(--t); margin-bottom:6px; font-weight:500;">${detail}</div>
-      <div style="font-size:11px; color:var(--t3); margin-bottom:22px;">${message}</div>
-      <div style="display:flex; justify-content:center;">
-        <button class="btn btn-outline btn-sm" onclick="window._closeInfoModal()">OK</button>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) window._closeInfoModal(); });
-}
-
-function closeInfoModal() {
-  const modal = document.getElementById('infoModal');
-  if (modal) modal.remove();
-}
-
 // ─── Expose to window for onclick handlers ───
 
 window._toggleBucketCollapsed = toggleBucketCollapsed;
@@ -1553,7 +1775,6 @@ window._editExpCell = editExpCell;
 window._deleteExpenseLine = deleteExpenseLine;
 window._closeDeleteModal = closeDeleteModal;
 window._confirmDeleteLine = confirmDeleteLine;
-window._closeInfoModal = closeInfoModal;
 window._addExpenseLineItem = addExpenseLineItem;
 window._closeAddLineModal = closeAddLineModal;
 window._confirmAddLineItem = confirmAddLineItem;
@@ -1568,3 +1789,7 @@ window._setExpGranularity = setExpGranularity;
 window._setExpChartType = setExpChartType;
 window._setExpChartRange = setExpChartRange;
 window._deleteExpense = deleteExpense;
+window._closeLearnPatternModal = closeLearnPatternModal;
+window._confirmLearnPattern = confirmLearnPattern;
+window._closeNewLineFromPreview = closeNewLineFromPreview;
+window._confirmNewLineFromPreview = confirmNewLineFromPreview;

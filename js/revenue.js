@@ -1,6 +1,6 @@
 // Revenue page module
 import { supabase } from './supabase-client.js';
-import { YEARS, MONTH_NAMES, MONTH_NAMES_FULL, fmt, fmtTotal, showToast } from './utils.js';
+import { YEARS, MONTH_NAMES, MONTH_NAMES_FULL, fmt, fmtTotal, showToast, showInfoModal, showConfirmModal } from './utils.js';
 import { recomputeAccountTotals } from './projection.js';
 
 // ─── Constants ───
@@ -58,7 +58,7 @@ async function loadFromSupabase() {
     const monthly = {};
     const projectedMonths = [];
     (cellsByAcct[a.id] || []).forEach(c => {
-      monthly[c.year_month] = c.amount;
+      monthly[c.year_month] = parseFloat(c.amount);
       if (c.is_projected) projectedMonths.push(c.year_month);
     });
 
@@ -418,26 +418,26 @@ function projectRevenueRestOfYear() {
   updateClearProjBtnVisibility();
 
   if (filledCount === 0) {
-    alert('Nothing to project \u2014 all eligible cells already have values, or no accounts have current-year data.');
+    showInfoModal('Nothing to project', 'No changes made', 'All eligible cells already have values, or no accounts have current-year data.');
   }
 }
 
 function clearRevenueProjections() {
-  if (!confirm('Clear all projected values? This will remove forecasted entries but keep all real data intact.')) return;
-
-  REVENUE_DATA.forEach(acct => {
-    if (!acct.projectedMonths || acct.projectedMonths.length === 0) return;
-    const clearedKeys = [...acct.projectedMonths];
-    acct.projectedMonths.forEach(key => {
-      delete acct.monthly[key];
+  showConfirmModal('Clear projections', 'Revenue', 'This will remove all forecasted entries but keep real data intact.', () => {
+    REVENUE_DATA.forEach(acct => {
+      if (!acct.projectedMonths || acct.projectedMonths.length === 0) return;
+      const clearedKeys = [...acct.projectedMonths];
+      acct.projectedMonths.forEach(key => {
+        delete acct.monthly[key];
+      });
+      acct.projectedMonths = [];
+      recomputeAccountTotals(acct);
+      persistClearProjections(acct, clearedKeys);
     });
-    acct.projectedMonths = [];
-    recomputeAccountTotals(acct);
-    persistClearProjections(acct, clearedKeys);
-  });
 
-  renderRevenue();
-  updateClearProjBtnVisibility();
+    renderRevenue();
+    updateClearProjBtnVisibility();
+  });
 }
 
 // ─── Active/Inactive toggle ───
