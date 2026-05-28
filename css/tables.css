@@ -64,11 +64,7 @@
 .bonus-cell { background: var(--amberl) !important; color: var(--amber); font-weight: 500; border-left: 0.5px solid var(--b); }
 .acct-inactive .bonus-cell { opacity: 0.6; }
 
-.bank-ML { color: var(--blue); }
-.bank-JPM { color: var(--navy); }
-.bank-UBS { color: var(--slate); }
-.bank-GS { color: var(--indigo); }
-.bank-IBKR { color: var(--gold); }
+.bank-ML, .bank-JPM, .bank-UBS, .bank-GS, .bank-IBKR { color: var(--t); }
 
 .editable-cell { cursor: cell; position: relative; transition: background-color 0.1s; }
 .editable-cell:hover { background: var(--bluel) !important; box-shadow: inset 0 0 0 1px var(--blue); }

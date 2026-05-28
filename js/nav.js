@@ -73,12 +73,31 @@ export function initNav() {
     el.style.display = canAccess(page) ? '' : 'none';
   });
 
-  // If only office is allowed (Deborah), hide Expenses parent and show office directly
+  // If only office is allowed (Deborah), hide the Expenses dropdown and show
+  // "Office Expenses" as a standalone top-level nav item instead
   if (user.allowedPages.length === 1 && user.allowedPages[0] === 'office') {
     const navSection = document.querySelector('.nav-section');
     if (navSection) navSection.style.display = 'none';
-    // The office nav-child is already shown via data-page
+
+    // Insert a standalone nav-item for Office Expenses after the revenue item
+    const officeNavItem = document.createElement('div');
+    officeNavItem.className = 'nav-item';
+    officeNavItem.dataset.page = 'office';
+    officeNavItem.onclick = () => window._nav('office');
+    officeNavItem.innerHTML = `
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M19 17v2a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2"/><polyline points="9 11 12 14 17 9"/></svg>
+      Office Expenses`;
+    const sbNav = document.querySelector('.sb-nav');
+    if (sbNav) sbNav.appendChild(officeNavItem);
   }
+
+  // Hide page sections user can't access (defense in depth — RLS is the real guard)
+  document.querySelectorAll('.page').forEach(pageEl => {
+    const pageId = pageEl.id.replace('page-', '');
+    if (!canAccess(pageId)) {
+      pageEl.remove();
+    }
+  });
 
   // Wire up sign-out
   const signOutBtn = document.getElementById('signOutBtn');
