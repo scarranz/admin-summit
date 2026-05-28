@@ -608,9 +608,18 @@ export function renderOverview() {
   renderOvTable();
 }
 
-export function loadOverviewPage() {
-  // Overview uses data already loaded by other modules (revenue, payroll, office, fx).
-  // Just render.
+export async function loadOverviewPage() {
+  // Overview depends on all three data sources — load them if not already loaded
+  const { loadRevenuePage } = await import('./revenue.js');
+  const { loadPayrollPage } = await import('./payroll.js');
+  const { loadOfficePage } = await import('./office.js');
+
+  await Promise.all([
+    loadRevenuePage(),
+    loadPayrollPage(),
+    loadOfficePage(),
+  ]);
+
   renderOverview();
 }
 

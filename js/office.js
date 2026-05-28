@@ -7,6 +7,7 @@ import { toggleFxEditor, renderFxEditor, FX_RATES } from './fx.js';
 // ─── Data ───
 
 let EXPENSE_LINES = [];
+let _dataLoaded = false;
 // Legacy alias
 let EXPENSE_DATA = EXPENSE_LINES;
 
@@ -485,15 +486,18 @@ function renderExpCategoryBody() {
       const active = isExpCategoryActive(subcat);
       const rowCls = active ? 'acct-row subcat-row' : 'acct-row subcat-row exp-row-inactive';
       const safeCat = subcat.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-      const toggleBtn = `<button class="acct-toggle ${active ? 'is-active' : 'is-inactive'}"
+      const toggleBtn = `<button class="line-toggle-btn"
         onclick="event.stopPropagation(); window._toggleExpCategoryActive('${safeCat}')"
-        title="${active ? 'Mark as inactive' : 'Mark as active'}">${active ? '●' : '○'}</button>`;
+        title="${active ? 'Hide' : 'Show'}">${active ? 'hide' : 'show'}</button>`;
+      const deleteBtn = `<button class="line-delete-btn"
+        onclick="event.stopPropagation(); window._deleteExpenseLine('${safeCat}')"
+        title="Delete line item">✕</button>`;
 
       const line = EXPENSE_LINES.find(l => l.name === subcat);
 
       html += `<tr class="${rowCls}">`;
       html += '<td class="sticky-col"></td>';
-      html += `<td class="sticky-col-2 subcat-label">${toggleBtn}${subcat}</td>`;
+      html += `<td class="sticky-col-2"><div class="subcat-inner"><span class="subcat-name">${subcat}</span><span class="subcat-actions">${toggleBtn}${deleteBtn}</span></div></td>`;
 
       YEARS.forEach(y => {
         if (expState.yearsOpen.has(y)) {
@@ -1437,8 +1441,72 @@ export function renderOfficeExpenses() {
 // ─── Page loader ───
 
 export async function loadOfficePage() {
-  await loadExpenseData();
+  if (!_dataLoaded) {
+    await loadExpenseData();
+    _dataLoaded = true;
+  }
   renderOfficeExpenses();
+}
+
+// ─── Delete line item ───
+
+let _pendingDeleteSubcat = null;
+
+function deleteExpenseLine(subcat) {
+  _pendingDeleteSubcat = subcat;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'deleteConfirmModal';
+  overlay.innerHTML = `
+    <div class="modal-card" style="width:340px; text-align:center;">
+      <div style="font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--t3); font-weight:500; margin-bottom:14px;">Delete line item</div>
+      <div style="font-size:14px; color:var(--t); margin-bottom:6px; font-weight:500;">${subcat}</div>
+      <div style="font-size:11px; color:var(--t3); margin-bottom:22px;">This will remove the line and all its data.<br>This action cannot be undone.</div>
+      <div style="display:flex; gap:8px; justify-content:center;">
+        <button class="btn btn-outline btn-sm" onclick="window._closeDeleteModal()">Cancel</button>
+        <button class="btn btn-sm" style="background:var(--red);color:#fff;" onclick="window._confirmDeleteLine()">Delete</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) window._closeDeleteModal(); });
+}
+
+function closeDeleteModal() {
+  const modal = document.getElementById('deleteConfirmModal');
+  if (modal) modal.remove();
+  _pendingDeleteSubcat = null;
+}
+
+async function confirmDeleteLine() {
+  const subcat = _pendingDeleteSubcat;
+  closeDeleteModal();
+  if (!subcat) return;
+
+  const line = EXPENSE_LINES.find(l => l.name === subcat);
+  if (!line) return;
+
+  // Remove from data array
+  const idx = EXPENSE_LINES.indexOf(line);
+  if (idx !== -1) EXPENSE_LINES.splice(idx, 1);
+
+  // Remove from bucket subs so the row disappears
+  EXPENSE_BUCKETS.forEach(b => {
+    const si = b.subs.indexOf(subcat);
+    if (si !== -1) b.subs.splice(si, 1);
+  });
+
+  // Remove from SUB_TO_BUCKET
+  delete SUB_TO_BUCKET[subcat];
+
+  renderOfficeExpenses();
+
+  if (line.id) {
+    const { error } = await supabase.from('office_expense_lines').delete().eq('id', line.id);
+    if (error) {
+      showToast('Failed to delete — please refresh', 'error');
+      console.error('Delete expense line failed:', error);
+    }
+  }
 }
 
 // ─── Expose to window for onclick handlers ───
@@ -1450,6 +1518,9 @@ window._toggleExpenseView = toggleExpenseView;
 window._toggleExpCategoryActive = toggleExpCategoryActive;
 window._toggleExpShowInactive = toggleExpShowInactive;
 window._editExpCell = editExpCell;
+window._deleteExpenseLine = deleteExpenseLine;
+window._closeDeleteModal = closeDeleteModal;
+window._confirmDeleteLine = confirmDeleteLine;
 window._addExpenseLineItem = addExpenseLineItem;
 window._closeAddLineModal = closeAddLineModal;
 window._confirmAddLineItem = confirmAddLineItem;

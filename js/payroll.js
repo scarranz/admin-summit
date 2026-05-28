@@ -7,6 +7,7 @@ import { destroyChart, storeChart } from './charts.js';
 
 // ─── Data ───
 let PAYROLL_DATA = [];
+let _dataLoaded = false;
 
 // ─── State ───
 const payState = {
@@ -215,24 +216,27 @@ function transformSupabaseData(employees, cells) {
 }
 
 export async function loadPayrollPage() {
-  try {
-    const [empRes, cellRes] = await Promise.all([
-      supabase.from('payroll_employees').select('id, name, is_active, display_order').order('display_order'),
-      supabase.from('payroll_cells').select('employee_id, year_month, amount_mxn')
-    ]);
-
-    if (empRes.error || cellRes.error) throw new Error('Supabase payroll query failed');
-
-    PAYROLL_DATA = transformSupabaseData(empRes.data, cellRes.data);
-  } catch (err) {
-    console.error('Supabase payroll load failed, falling back to JSON:', err);
+  if (!_dataLoaded) {
     try {
-      const resp = await fetch('/payroll_data.json');
-      PAYROLL_DATA = await resp.json();
-    } catch (e2) {
-      console.error('Payroll JSON fallback also failed:', e2);
-      PAYROLL_DATA = [];
+      const [empRes, cellRes] = await Promise.all([
+        supabase.from('payroll_employees').select('id, name, is_active, display_order').order('display_order'),
+        supabase.from('payroll_cells').select('employee_id, year_month, amount_mxn')
+      ]);
+
+      if (empRes.error || cellRes.error) throw new Error('Supabase payroll query failed');
+
+      PAYROLL_DATA = transformSupabaseData(empRes.data, cellRes.data);
+    } catch (err) {
+      console.error('Supabase payroll load failed, falling back to JSON:', err);
+      try {
+        const resp = await fetch('/payroll_data.json');
+        PAYROLL_DATA = await resp.json();
+      } catch (e2) {
+        console.error('Payroll JSON fallback also failed:', e2);
+        PAYROLL_DATA = [];
+      }
     }
+    _dataLoaded = true;
   }
   renderPayroll();
 }

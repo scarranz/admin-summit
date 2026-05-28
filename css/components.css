@@ -38,10 +38,19 @@
 .acct-toggle.is-inactive { background: var(--w); color: var(--t3); border-color: var(--t3); }
 .acct-toggle:hover { transform: scale(1.15); }
 
+.subcat-inner { display: flex; align-items: center; justify-content: space-between; width: 100%; }
+.subcat-name { display: flex; align-items: center; }
+.subcat-actions { opacity: 0; transition: opacity 0.15s; margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.subcat-row:hover .subcat-actions { opacity: 1; }
+.line-toggle-btn { background: none; border: none; color: var(--t3); font-size: 9px; cursor: pointer; padding: 1px 4px; font-family: 'Jost', sans-serif; line-height: 1; letter-spacing: 0.05em; }
+.line-toggle-btn:hover { color: var(--t2); }
+.line-delete-btn { background: none; border: none; color: var(--t3); font-size: 10px; cursor: pointer; padding: 1px 4px; font-family: 'Jost', sans-serif; line-height: 1; }
+.line-delete-btn:hover { color: var(--red); }
+
 .modal-overlay { position: fixed; inset: 0; background: rgba(26,26,24,0.45); display: flex; align-items: center; justify-content: center; z-index: 9999; animation: fadeIn 0.15s ease; }
 .modal-card { background: var(--w); border-radius: 12px; padding: 22px 24px; width: 360px; max-width: 90vw; box-shadow: 0 8px 24px rgba(0,0,0,0.18); }
 .modal-card.modal-wide { width: 440px; }
-.modal-card.modal-xl { width: 700px; max-height: 80vh; overflow-y: auto; }
+.modal-card.modal-xl { width: 680px; max-height: 75vh; overflow-y: auto; }
 .modal-title { font-family: 'Jost', sans-serif; font-size: 16px; font-weight: 500; color: var(--t); margin-bottom: 18px; }
 .modal-field { margin-bottom: 16px; }
 .modal-label { display: block; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 500; color: var(--t3); margin-bottom: 8px; }
@@ -68,7 +77,11 @@
 .toast.error { background: var(--red); }
 .toast.success { background: var(--green); }
 
-.amex-preview-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 12px; }
-.amex-preview-table th { text-align: left; padding: 6px 8px; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--t3); font-weight: 500; border-bottom: 1px solid var(--b); }
-.amex-preview-table td { padding: 6px 8px; border-bottom: 0.5px solid var(--bl); vertical-align: middle; }
-.amex-preview-table select { padding: 4px 8px; border-radius: 6px; border: 0.5px solid var(--b); font-family: 'Jost', sans-serif; font-size: 11px; color: var(--t); }
+.amex-preview-card { width: 640px !important; max-width: 90vw; max-height: 80vh; display: flex; flex-direction: column; }
+.amex-preview-sub { font-size: 11px; color: var(--t3); margin-bottom: 14px; }
+.amex-preview-table-wrap { overflow-y: auto; max-height: 50vh; border: 0.5px solid var(--b); border-radius: 8px; }
+.amex-preview-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.amex-preview-table th { text-align: left; padding: 6px 10px; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--t3); font-weight: 500; border-bottom: 1px solid var(--b); background: var(--off); position: sticky; top: 0; z-index: 1; }
+.amex-preview-table td { padding: 6px 10px; border-bottom: 0.5px solid var(--bl); vertical-align: middle; }
+.amex-preview-table select { padding: 3px 6px; border-radius: 6px; border: 0.5px solid var(--b); font-family: 'Jost', sans-serif; font-size: 10px; color: var(--t); }
+.amex-preview-summary { font-size: 11px; color: var(--t2); margin-top: 12px; }

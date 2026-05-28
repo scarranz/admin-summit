@@ -16,6 +16,7 @@ const ADVANCE_BILLED_BANKS = new Set(['GS']);
 
 // ─── Data & State ───
 export let REVENUE_DATA = [];
+let _dataLoaded = false;
 
 const revState = {
   yearsOpen: new Set([2026]),
@@ -102,16 +103,19 @@ async function loadFromJson() {
 }
 
 export async function loadRevenuePage() {
-  try {
-    REVENUE_DATA = await loadFromSupabase();
-  } catch (e) {
-    console.warn('Supabase revenue load failed, falling back to JSON:', e);
+  if (!_dataLoaded) {
     try {
-      REVENUE_DATA = await loadFromJson();
-    } catch (e2) {
-      console.error('Revenue fallback also failed:', e2);
-      REVENUE_DATA = [];
+      REVENUE_DATA = await loadFromSupabase();
+    } catch (e) {
+      console.warn('Supabase revenue load failed, falling back to JSON:', e);
+      try {
+        REVENUE_DATA = await loadFromJson();
+      } catch (e2) {
+        console.error('Revenue fallback also failed:', e2);
+        REVENUE_DATA = [];
+      }
     }
+    _dataLoaded = true;
   }
   renderRevenue();
 }

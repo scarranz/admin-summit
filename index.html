@@ -204,6 +204,23 @@
         <span class="bank-filter-label">&nbsp;</span>
         <div class="bank-filter-pills"></div>
         <button class="inactive-link" onclick="window._togglePayrollShowInactive()" id="payHiddenToggleBtn">Show inactive</button>
+        <button class="inactive-link" onclick="window._toggleFxEditor()" id="fxToggleBtn" style="margin-left: 12px;">USD/MXN rates</button>
+      </div>
+      <div id="fxEditorWrap" style="display:none; margin-top: 12px; margin-bottom: 12px;">
+        <div class="fx-editor-card">
+          <div class="fx-editor-header">
+            <div>
+              <div class="fx-editor-title">USD/MXN end-of-month rates</div>
+              <div class="fx-editor-sub">Used to convert payroll (MXN) to USD for operating margin calculations. Click any cell to edit.</div>
+            </div>
+          </div>
+          <div class="fx-editor-table-wrap">
+            <table class="fx-editor-table" id="fxEditorTable">
+              <thead id="fxEditorHead"></thead>
+              <tbody id="fxEditorBody"></tbody>
+            </table>
+          </div>
+        </div>
       </div>
       <div class="rev-table-wrap">
         <div class="rev-table-scroll">
@@ -265,24 +282,7 @@
         <button class="inactive-link" onclick="window._toggleExpShowInactive()" id="expHiddenToggleBtn">Show inactive</button>
         <button class="inactive-link" onclick="window._projectOfficeExpensesRestOfYear()" style="margin-left: 12px;">Projection</button>
         <button class="inactive-link" onclick="window._clearOfficeExpenseProjections()" id="expClearProjBtn" style="margin-left: 12px; display:none;">Clear projections</button>
-        <button class="inactive-link" onclick="window._toggleFxEditor()" id="fxToggleBtn" style="margin-left: 12px;">USD/MXN rates</button>
         <button class="inactive-link" onclick="window._addExpenseLineItem()" style="margin-left: 12px;">+ Add line item</button>
-      </div>
-      <div id="fxEditorWrap" style="display:none; margin-top: 12px; margin-bottom: 12px;">
-        <div class="fx-editor-card">
-          <div class="fx-editor-header">
-            <div>
-              <div class="fx-editor-title">USD/MXN end-of-month rates</div>
-              <div class="fx-editor-sub">Used to convert payroll (MXN) to USD for operating margin calculations. Click any cell to edit.</div>
-            </div>
-          </div>
-          <div class="fx-editor-table-wrap">
-            <table class="fx-editor-table" id="fxEditorTable">
-              <thead id="fxEditorHead"></thead>
-              <tbody id="fxEditorBody"></tbody>
-            </table>
-          </div>
-        </div>
       </div>
       <div class="rev-table-wrap">
         <div class="rev-table-scroll">
