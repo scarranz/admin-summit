@@ -1,8 +1,8 @@
 // Office Expenses page module
 import { supabase } from './supabase-client.js';
-import { YEARS, MONTH_NAMES, MONTH_NAMES_FULL, fmtUsd, fmtUsdShort, showToast, showInfoModal, showConfirmModal, yearMonthKey } from './utils.js';
+import { YEARS, MONTH_NAMES, MONTH_NAMES_FULL, fmtUsd, fmtUsdShort, fmtMxn, showToast, showInfoModal, showConfirmModal, yearMonthKey } from './utils.js';
 import { recomputeLineTotals } from './projection.js';
-import { toggleFxEditor, renderFxEditor, FX_RATES } from './fx.js';
+import { toggleFxEditor, renderFxEditor, FX_RATES, fxRate, mxnToUsd } from './fx.js';
 
 // ─── Data ───
 
@@ -12,9 +12,9 @@ let _dataLoaded = false;
 let EXPENSE_DATA = EXPENSE_LINES;
 
 const EXPENSE_BUCKETS = [
-  { name: 'Office',             subs: ['Renta', 'Aire Acondicionado', 'Telmex', 'Luz'] },
+  { name: 'Office',             subs: ['Renta', 'Luz', 'Limpieza', 'AMICSA'], currency: 'MXN' },
   { name: 'Technology',         subs: ['Bloomberg', 'Polygon', 'Google', 'Ycharts', 'ChatGPT', 'Claude', 'Neon.Tech', 'Fiscal.AI', 'Fly.io', 'Microsoft', 'Kumu', 'Servicios Tecnológicos'] },
-  { name: 'Office Supply/Food', subs: ['Nespresso', 'Super/Desayunos'] },
+  { name: 'Office Supply/Food', subs: ['Nespresso', 'Super/Desayunos', 'Telmex', 'AQA', 'AC'] },
   { name: 'Other',              subs: ['Extras', 'Supply oficina', 'Office Expenses'] },
 ];
 
@@ -51,7 +51,8 @@ const expState = {
   inactiveOverrides: new Map(),
   expandedCategory: null,
   collapsedBuckets: new Set(['Office', 'Technology', 'Office Supply/Food', 'Other']),
-  chart: { granularity: 'monthly', type: 'bar', range: '12m' }
+  chart: { granularity: 'monthly', type: 'bar', range: '12m' },
+  monthCompare: 'mom'  // 'yoy' = same month last year, 'mom' = vs previous month
 };
 
 // Category color hints
@@ -104,7 +105,56 @@ async function loadExpenseData() {
     });
 
     EXPENSE_LINES = Object.values(linesById);
+
+    // One-time cleanup: delete junk lines from DB
+    const DELETE_LINES = new Set(['test', 'test2', 'renta', 'test3287', 'hello']);
+    EXPENSE_LINES.forEach(line => {
+      if (DELETE_LINES.has(line.name) && line._id) {
+        supabase.from('office_expense_cells').delete().eq('line_id', line._id).then(() => {
+          supabase.from('office_expense_lines').delete().eq('id', line._id).then(() => {});
+        });
+      }
+    });
+    EXPENSE_LINES = EXPENSE_LINES.filter(l => !DELETE_LINES.has(l.name));
+
+    // One-time renames (migrates old names to new)
+    const RENAMES = { 'Aire Acondicionado': 'AC' };
+    EXPENSE_LINES.forEach(line => {
+      if (RENAMES[line.name]) {
+        const newName = RENAMES[line.name];
+        if (line._id) {
+          supabase.from('office_expense_lines').update({ name: newName }).eq('id', line._id).then(() => {});
+        }
+        line.name = newName;
+      }
+    });
+
     EXPENSE_LINES.forEach(line => recomputeLineTotals(line));
+
+    // Ensure every loaded line appears in its EXPENSE_BUCKETS subs list
+    EXPENSE_LINES.forEach(line => {
+      // Check if line is already in a hardcoded bucket (takes priority over DB)
+      const hardcodedBucket = EXPENSE_BUCKETS.find(b => b.subs.includes(line.name));
+      let bucket;
+      if (hardcodedBucket) {
+        bucket = hardcodedBucket;
+        // Update DB bucket if it differs
+        if (line._id && line.bucket !== bucket.name) {
+          supabase.from('office_expense_lines').update({ bucket: bucket.name }).eq('id', line._id).then(() => {});
+        }
+      } else {
+        let bName = line.bucket || 'Other';
+        // Don't dynamically add lines to MXN buckets — send to Other
+        const candidate = EXPENSE_BUCKETS.find(b => b.name === bName);
+        if (candidate && candidate.currency) bName = 'Other';
+        bucket = EXPENSE_BUCKETS.find(b => b.name === bName);
+        if (!bucket) bucket = EXPENSE_BUCKETS.find(b => b.name === 'Other');
+        if (bucket && !bucket.subs.includes(line.name)) {
+          bucket.subs.push(line.name);
+        }
+      }
+      SUB_TO_BUCKET[line.name] = bucket ? bucket.name : 'Other';
+    });
 
     // Set inactive overrides from is_active
     EXPENSE_LINES.forEach(line => {
@@ -279,32 +329,83 @@ function bucketProjectionGrand(bucketName) {
     }, 0);
 }
 
-// ─── Total aggregations ───
+// ─── Currency helpers ───
 
-export function expTotalMonth(year, month) {
-  const key = `${year}-${String(month).padStart(2, '0')}`;
-  return EXPENSE_LINES.reduce((s, l) => s + (l.monthly[key] || 0), 0);
+function isMxnBucket(bucketName) {
+  const b = EXPENSE_BUCKETS.find(x => x.name === bucketName);
+  return b && b.currency === 'MXN';
 }
 
-export function expTotalYear(year) {
-  return EXPENSE_LINES.reduce((s, l) => s + (l.year_totals[year] || 0), 0);
+function isMxnLine(subcat) {
+  return isMxnBucket(bucketOf(subcat));
 }
 
-function expGrandTotal() {
-  return EXPENSE_LINES.reduce((s, l) => s + l.grand_total, 0);
-}
-
-// Bucket-level aggregations
-function expBucketMonth(bucketName, year, month) {
+// Raw MXN total for a bucket (no conversion)
+function expBucketMonthMxn(bucketName, year, month) {
   return bucketSubcats(bucketName).reduce((s, sc) => s + expCategoryMonth(sc, year, month), 0);
 }
 
+function expBucketYearMxn(bucketName, year) {
+  let total = 0;
+  for (let m = 1; m <= 12; m++) total += expBucketMonthMxn(bucketName, year, m);
+  return total;
+}
+
+function expBucketGrandMxn(bucketName) {
+  let total = 0;
+  YEARS.forEach(y => { total += expBucketYearMxn(bucketName, y); });
+  return total;
+}
+
+// ─── Total aggregations (all in USD) ───
+
+export function expTotalMonth(year, month) {
+  let total = 0;
+  EXPENSE_BUCKETS.forEach(b => {
+    total += expBucketMonth(b.name, year, month);
+  });
+  return total;
+}
+
+export function expTotalYear(year) {
+  let total = 0;
+  EXPENSE_BUCKETS.forEach(b => {
+    total += expBucketYear(b.name, year);
+  });
+  return total;
+}
+
+function expGrandTotal() {
+  let total = 0;
+  EXPENSE_BUCKETS.forEach(b => {
+    total += expBucketGrand(b.name);
+  });
+  return total;
+}
+
+// Bucket-level aggregations (returns USD)
+function expBucketMonth(bucketName, year, month) {
+  const raw = bucketSubcats(bucketName).reduce((s, sc) => s + expCategoryMonth(sc, year, month), 0);
+  if (isMxnBucket(bucketName)) {
+    const key = `${year}-${String(month).padStart(2, '0')}`;
+    // If no FX rate is set for this month, treat as $0
+    if (!FX_RATES[key]) return 0;
+    return mxnToUsd(raw, key);
+  }
+  return raw;
+}
+
 function expBucketYear(bucketName, year) {
-  return bucketSubcats(bucketName).reduce((s, sc) => s + expCategoryYear(sc, year), 0);
+  // Sum monthly USD values to account for varying FX rates
+  let total = 0;
+  for (let m = 1; m <= 12; m++) total += expBucketMonth(bucketName, year, m);
+  return total;
 }
 
 function expBucketGrand(bucketName) {
-  return bucketSubcats(bucketName).reduce((s, sc) => s + expCategoryGrand(sc), 0);
+  let total = 0;
+  YEARS.forEach(y => { total += expBucketYear(bucketName, y); });
+  return total;
 }
 
 // "Actual-only" aggregates (excludes projected months) — used by projector
@@ -319,18 +420,31 @@ function lineRealLatestInYear(line, year) {
   return { key: realKeys[realKeys.length - 1], value: line.monthly[realKeys[realKeys.length - 1]] };
 }
 
-// Chart-specific aggregations — respect category visibility
+// Chart-specific aggregations — respect category visibility (all in USD)
 function expVisibleMonth(year, month) {
   const key = `${year}-${String(month).padStart(2, '0')}`;
-  return EXPENSE_LINES
+  let total = 0;
+  EXPENSE_LINES
     .filter(l => isExpCategoryVisible(l.name))
-    .reduce((s, l) => s + (l.monthly[key] || 0), 0);
+    .forEach(l => {
+      const val = l.monthly[key] || 0;
+      total += isMxnLine(l.name) ? mxnToUsd(val, key) : val;
+    });
+  return total;
 }
 
 function expVisibleYear(year) {
-  return EXPENSE_LINES
-    .filter(l => isExpCategoryVisible(l.name))
-    .reduce((s, l) => s + (l.year_totals[year] || 0), 0);
+  let total = 0;
+  for (let m = 1; m <= 12; m++) {
+    const key = `${year}-${String(m).padStart(2, '0')}`;
+    EXPENSE_LINES
+      .filter(l => isExpCategoryVisible(l.name))
+      .forEach(l => {
+        const val = l.monthly[key] || 0;
+        total += isMxnLine(l.name) ? mxnToUsd(val, key) : val;
+      });
+  }
+  return total;
 }
 
 // ─── Projection ───
@@ -367,7 +481,7 @@ function projectOfficeExpensesRestOfYear() {
   });
 
   renderOfficeExpenses();
-  updateExpClearProjBtnVisibility();
+  updateExpProjBtnLabel();
 
   if (filled === 0) {
     showInfoModal('Nothing to project', 'No changes made', 'No projectable sub-categories have current-year actuals beyond what is already projected.');
@@ -383,7 +497,7 @@ function clearOfficeExpenseProjections() {
       recomputeLineTotals(line);
     });
     renderOfficeExpenses();
-    updateExpClearProjBtnVisibility();
+    updateExpProjBtnLabel();
   });
 }
 
@@ -391,9 +505,17 @@ function hasAnyOfficeProjections() {
   return EXPENSE_LINES.some(lineHasAnyProjection);
 }
 
-function updateExpClearProjBtnVisibility() {
-  const btn = document.getElementById('expClearProjBtn');
-  if (btn) btn.style.display = hasAnyOfficeProjections() ? '' : 'none';
+function updateExpProjBtnLabel() {
+  const btn = document.getElementById('expProjToggleBtn');
+  if (btn) btn.textContent = hasAnyOfficeProjections() ? 'Clear projections' : 'Projection';
+}
+
+function toggleExpProjection() {
+  if (hasAnyOfficeProjections()) {
+    clearOfficeExpenseProjections();
+  } else {
+    projectOfficeExpensesRestOfYear();
+  }
 }
 
 // ─── State toggles ───
@@ -422,6 +544,11 @@ function toggleExpCategory(cat) {
 function toggleExpenseView() {
   expState.view = expState.view === 'category' ? 'log' : 'category';
   renderOfficeExpenses();
+}
+
+function toggleMonthCompare() {
+  expState.monthCompare = expState.monthCompare === 'yoy' ? 'mom' : 'yoy';
+  renderExpCategoryFoot();
 }
 
 // ─── Header controls ───
@@ -517,6 +644,9 @@ function renderExpCategoryBody() {
 
     if (collapsed) return;
 
+    const isMxn = bucket.currency === 'MXN';
+    const fmt = isMxn ? fmtMxn : fmtUsd;
+
     // Sub-category rows under each bucket
     bucket.subs.forEach(subcat => {
       if (!isExpCategoryVisible(subcat)) return;
@@ -543,20 +673,90 @@ function renderExpCategoryBody() {
             const key = `${y}-${String(m).padStart(2, '0')}`;
             const val = expCategoryMonth(subcat, y, m);
             const pc = line && isLineProjected(line, y, m) ? ' projected-cell' : '';
-            html += `<td class="num editable-cell${pc}" data-subcat="${safeCat}" data-month-key="${key}" onclick="window._editExpCell(this)">${fmtUsd(val)}</td>`;
+            html += `<td class="num editable-cell${pc}" data-subcat="${safeCat}" data-month-key="${key}" onclick="window._editExpCell(this)">${fmt(val)}</td>`;
           }
           const pcYt = line && lineHasProjectionInYear(line, y) ? ' projected-cell' : '';
-          html += `<td class="year-total-cell num${pcYt}">${fmtUsd(expCategoryYear(subcat, y))}</td>`;
+          html += `<td class="year-total-cell num${pcYt}">${fmt(expCategoryYear(subcat, y))}</td>`;
         } else {
           const pcYt = line && lineHasProjectionInYear(line, y) ? ' projected-cell' : '';
-          html += `<td class="num${pcYt}">${fmtUsd(expCategoryYear(subcat, y))}</td>`;
+          html += `<td class="num${pcYt}">${fmt(expCategoryYear(subcat, y))}</td>`;
         }
       });
 
       const pcG = line && lineHasAnyProjection(line) ? ' projected-cell' : '';
-      html += `<td class="grand-total-cell num${pcG}">${fmtUsd(expCategoryGrand(subcat))}</td>`;
+      html += `<td class="grand-total-cell num${pcG}">${fmt(expCategoryGrand(subcat))}</td>`;
       html += '</tr>';
     });
+
+    // MXN bucket: add Total MXN, USD/MXN rate, and Total USD rows
+    if (isMxn) {
+      // Total MXN row
+      html += '<tr class="subcat-row mxn-summary-row">';
+      html += '<td class="sticky-col"></td>';
+      html += '<td class="sticky-col-2" style="font-weight:600; font-style:italic;">Total MXN</td>';
+      YEARS.forEach(y => {
+        if (expState.yearsOpen.has(y)) {
+          for (let m = 1; m <= 12; m++) {
+            html += `<td class="num" style="font-weight:600;">${fmtMxn(expBucketMonthMxn(bucket.name, y, m))}</td>`;
+          }
+          html += `<td class="year-total-cell num" style="font-weight:600;">${fmtMxn(expBucketYearMxn(bucket.name, y))}</td>`;
+        } else {
+          html += `<td class="num" style="font-weight:600;">${fmtMxn(expBucketYearMxn(bucket.name, y))}</td>`;
+        }
+      });
+      html += `<td class="grand-total-cell num" style="font-weight:600;">${fmtMxn(expBucketGrandMxn(bucket.name))}</td>`;
+      html += '</tr>';
+
+      // USD/MXN rate row
+      html += '<tr class="subcat-row mxn-rate-row">';
+      html += '<td class="sticky-col"></td>';
+      html += '<td class="sticky-col-2" style="font-style:italic; color:var(--t2);">USD/MXN</td>';
+      YEARS.forEach(y => {
+        if (expState.yearsOpen.has(y)) {
+          for (let m = 1; m <= 12; m++) {
+            const key = `${y}-${String(m).padStart(2, '0')}`;
+            const rate = FX_RATES[key];
+            const display = rate ? rate.toFixed(2) : '<span style="color:var(--t3);">—</span>';
+            html += `<td class="num editable-cell" data-fx-key="${key}" onclick="window._editFxCellInline(this)" style="color:var(--t2);">${display}</td>`;
+          }
+          // Year avg
+          let yrTotal = 0, yrCount = 0;
+          for (let m = 1; m <= 12; m++) {
+            const key = `${y}-${String(m).padStart(2, '0')}`;
+            if (FX_RATES[key]) { yrTotal += FX_RATES[key]; yrCount++; }
+          }
+          const avg = yrCount > 0 ? (yrTotal / yrCount).toFixed(2) : '—';
+          html += `<td class="year-total-cell num" style="color:var(--t2);">${avg}</td>`;
+        } else {
+          let yrTotal = 0, yrCount = 0;
+          for (let m = 1; m <= 12; m++) {
+            const key = `${y}-${String(m).padStart(2, '0')}`;
+            if (FX_RATES[key]) { yrTotal += FX_RATES[key]; yrCount++; }
+          }
+          const avg = yrCount > 0 ? (yrTotal / yrCount).toFixed(2) : '—';
+          html += `<td class="num" style="color:var(--t2);">${avg}</td>`;
+        }
+      });
+      html += '<td class="grand-total-cell num" style="color:var(--t2);"></td>';
+      html += '</tr>';
+
+      // Total USD row (converted)
+      html += '<tr class="subcat-row mxn-usd-row">';
+      html += '<td class="sticky-col"></td>';
+      html += '<td class="sticky-col-2" style="font-weight:600; font-style:italic;">Total USD</td>';
+      YEARS.forEach(y => {
+        if (expState.yearsOpen.has(y)) {
+          for (let m = 1; m <= 12; m++) {
+            html += `<td class="num" style="font-weight:600;">${fmtUsd(expBucketMonth(bucket.name, y, m))}</td>`;
+          }
+          html += `<td class="year-total-cell num" style="font-weight:600;">${fmtUsd(expBucketYear(bucket.name, y))}</td>`;
+        } else {
+          html += `<td class="num" style="font-weight:600;">${fmtUsd(expBucketYear(bucket.name, y))}</td>`;
+        }
+      });
+      html += `<td class="grand-total-cell num" style="font-weight:600;">${fmtUsd(expBucketGrand(bucket.name))}</td>`;
+      html += '</tr>';
+    }
   });
 
   document.getElementById('expCategoryBody').innerHTML = html;
@@ -597,34 +797,57 @@ function renderExpCategoryFoot() {
   totalHtml += `<td class="grand-total-cell num display-num${pcG}" style="font-size:16px;">${fmtUsdShort(expGrandTotal())}</td>`;
   totalHtml += '</tr>';
 
-  // YoY row
+  // Check if any year is expanded (to show month-level toggle)
+  const anyExpanded = YEARS.some(y => expState.yearsOpen.has(y));
+  const mode = expState.monthCompare; // 'yoy' or 'mom'
+
+  // Growth comparison helper
+  function growthCell(cur, prev, extraCls) {
+    if (prev > 0) {
+      const pct = ((cur - prev) / prev) * 100;
+      const cls = pct >= 0 ? 'yoy-neg' : 'yoy-pos';  // For expenses: up = bad
+      const arrow = pct >= 0 ? '▲' : '▼';
+      return `<td class="${extraCls} num ${cls}">${arrow} ${pct.toFixed(1)}%</td>`;
+    }
+    if (cur > 0) return `<td class="${extraCls} num yoy-na">new</td>`;
+    return `<td class="${extraCls} num yoy-na">—</td>`;
+  }
+
+  // Month comparison helper — returns the comparison value for a given month
+  function getCompMonth(y, m, yi) {
+    if (mode === 'yoy') {
+      // Same month, previous year
+      return yi > 0 ? expTotalMonth(YEARS[yi - 1], m) : 0;
+    } else {
+      // Previous month
+      if (m > 1) return expTotalMonth(y, m - 1);
+      return yi > 0 ? expTotalMonth(YEARS[yi - 1], 12) : 0;
+    }
+  }
+
+  // Label with toggle
+  const yoyLabel = mode === 'yoy' ? 'vs same month last year' : 'vs previous month';
+  const toggleHtml = anyExpanded
+    ? `<span style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted;" onclick="window._toggleMonthCompare()" title="Click to switch">${yoyLabel}</span>`
+    : '% vs prev year';
+
   let yoyHtml = '<tr class="yoy-row">';
   yoyHtml += '<td class="sticky-col"></td>';
-  yoyHtml += '<td class="sticky-col-2">% vs prev year</td>';
+  yoyHtml += `<td class="sticky-col-2">${toggleHtml}</td>`;
 
-  YEARS.forEach((y, i) => {
+  YEARS.forEach((y, yi) => {
     const cur = expTotalYear(y);
-    const prev = i > 0 ? expTotalYear(YEARS[i - 1]) : 0;
+    const prev = yi > 0 ? expTotalYear(YEARS[yi - 1]) : 0;
 
     if (expState.yearsOpen.has(y)) {
-      for (let m = 1; m <= 12; m++) yoyHtml += '<td></td>';
-      if (prev > 0) {
-        const pct = ((cur - prev) / prev) * 100;
-        const cls = pct >= 0 ? 'yoy-neg' : 'yoy-pos';  // For expenses: up = bad
-        const arrow = pct >= 0 ? '▲' : '▼';
-        yoyHtml += `<td class="year-total-cell num ${cls}">${arrow} ${pct.toFixed(1)}%</td>`;
-      } else {
-        yoyHtml += '<td class="year-total-cell num yoy-na">—</td>';
+      for (let m = 1; m <= 12; m++) {
+        const curM = expTotalMonth(y, m);
+        const prevM = getCompMonth(y, m, yi);
+        yoyHtml += growthCell(curM, prevM, '');
       }
+      yoyHtml += growthCell(cur, prev, 'year-total-cell');
     } else {
-      if (prev > 0) {
-        const pct = ((cur - prev) / prev) * 100;
-        const cls = pct >= 0 ? 'yoy-neg' : 'yoy-pos';
-        const arrow = pct >= 0 ? '▲' : '▼';
-        yoyHtml += `<td class="num ${cls}">${arrow} ${pct.toFixed(1)}%</td>`;
-      } else {
-        yoyHtml += '<td class="num yoy-na">—</td>';
-      }
+      yoyHtml += growthCell(cur, prev, '');
     }
   });
 
@@ -731,7 +954,7 @@ function addExpenseLineItem() {
         <div class="modal-bucket-options">
           ${EXPENSE_BUCKETS.map((b, i) => `
             <label class="bucket-option">
-              <input type="radio" name="newLineBucket" value="${b.name}" ${i === 0 ? 'checked' : ''}>
+              <input type="radio" name="newLineBucket" value="${b.name}" ${i === 0 ? 'checked' : ''} onchange="window._updateAmountLabel()">
               <span>${b.name}</span>
             </label>
           `).join('')}
@@ -748,7 +971,7 @@ function addExpenseLineItem() {
           <select class="modal-input" id="newLineYear">${yearOpts}</select>
         </div>
         <div class="modal-field modal-field-3">
-          <label class="modal-label">Amount (USD)</label>
+          <label class="modal-label" id="newLineAmountLabel">Amount (${EXPENSE_BUCKETS[0].currency === 'MXN' ? 'MXN' : 'USD'})</label>
           <input type="number" step="0.01" class="modal-input" id="newLineAmount" placeholder="0.00">
         </div>
       </div>
@@ -1028,17 +1251,15 @@ function autoCategorizeAmex(desc) {
     [/OPENAI|CHATGPT/, 'ChatGPT'],
     [/NEON\.?TECH|NEON/, 'Neon.Tech'],
     [/FLY\.?IO/, 'Fly.io'],
-    [/POLYGON/, 'Polygon'],
+    [/POLYGON|MASSIVE/, 'Polygon'],
     [/YCHARTS/, 'Ycharts'],
     [/FISCAL\.?AI/, 'Fiscal.AI'],
     [/KUMU/, 'Kumu'],
     [/MICROSOFT/, 'Microsoft'],
     [/GOOGLE/, 'Google'],
-    [/MASSIVE/, 'Servicios Tecnológicos'],
     [/TELMEX|TELCEL/, 'Telmex'],
-    [/CFE|LUZ/, 'Luz'],
-    [/AIRE|AC /, 'Aire Acondicionado'],
-    [/RENT|RENTA/, 'Renta'],
+    [/AQA/, 'AQA'],
+    [/AERAIRES/, 'AC'],
     [/NESPRESSO/, 'Nespresso'],
     [/SUMESA|SUPERAMA|7-ELEVEN|SUPER/, 'Super/Desayunos'],
     [/AMAZON|OFFICE|PAPER/, 'Supply oficina'],
@@ -1057,7 +1278,7 @@ function showAmexPreview(transactions) {
   amexPreviewBuffer = transactions;
 
   const allSubcats = [];
-  EXPENSE_BUCKETS.forEach(b => b.subs.forEach(s => allSubcats.push(s)));
+  EXPENSE_BUCKETS.filter(b => !b.currency).forEach(b => b.subs.forEach(s => allSubcats.push(s)));
 
   // Count uncategorized rows
   const uncatCount = transactions.filter(t => t.category === null).length;
@@ -1184,7 +1405,7 @@ function updateAmexPreviewCat(idx, cat) {
 
   // Re-render to update existing-data notes and styling
   const allSubcats = [];
-  EXPENSE_BUCKETS.forEach(b => b.subs.forEach(s => allSubcats.push(s)));
+  EXPENSE_BUCKETS.filter(b => !b.currency).forEach(b => b.subs.forEach(s => allSubcats.push(s)));
   renderAmexPreviewRows(allSubcats);
 
   // If originally uncategorized and now assigned a real category, offer to learn
@@ -1313,7 +1534,7 @@ function confirmNewLineFromPreview(txIdx) {
 
   // Re-render preview rows with updated subcats
   const allSubcats = [];
-  EXPENSE_BUCKETS.forEach(b => b.subs.forEach(s => allSubcats.push(s)));
+  EXPENSE_BUCKETS.filter(b => !b.currency).forEach(b => b.subs.forEach(s => allSubcats.push(s)));
   renderAmexPreviewRows(allSubcats);
 
   // Offer to learn the pattern
@@ -1382,18 +1603,17 @@ function commitAmexImport() {
           }
         });
     } else {
-      line.monthly[ym] = Math.round(amount * 100) / 100;
+      const newVal = Math.round(amount * 100) / 100;
+      line.monthly[ym] = newVal;
       recomputeLineTotals(line);
 
       // Persist cell to Supabase
       if (line._id) {
         supabase.from('office_expense_cells')
-          .upsert({ line_id: line._id, year_month: ym, amount_usd: Math.round(amount * 100) / 100, is_projected: false, source: 'amex' })
+          .upsert({ line_id: line._id, year_month: ym, amount_usd: newVal, is_projected: false, source: 'amex' })
           .then(({ error }) => { if (error) showToast('Failed to save imported cell', 'error'); });
       }
     }
-    line.monthly[ym] = Math.round(amount * 100) / 100;
-    recomputeLineTotals(line);
   });
 
   // Refresh category list
@@ -1422,9 +1642,8 @@ function renderExpKpis() {
     for (let m = 1; m <= lastM; m++) ytd += expTotalMonth(curYear, m);
   }
 
-  // Projection
-  const remaining = lastY === curYear ? (12 - lastM) : 12;
-  const projection = ytd + (latestMonthTotal * remaining);
+  // Projection: use the year total (includes actuals + projections)
+  const projection = expTotalYear(curYear);
 
   const totalPrev = expTotalYear(curYear - 1);
   const vsPrev = totalPrev > 0 ? ((projection - totalPrev) / totalPrev) * 100 : 0;
@@ -1689,7 +1908,7 @@ export function renderOfficeExpenses() {
   renderExpCategoryBody();
   renderExpCategoryFoot();
   renderExpenseChart();
-  updateExpClearProjBtnVisibility();
+  updateExpProjBtnLabel();
 }
 
 // ─── Page loader ───
@@ -1763,12 +1982,65 @@ async function confirmDeleteLine() {
   }
 }
 
+// ─── Inline FX rate editor (within expense table) ───
+
+function editFxCellInline(td) {
+  if (td.querySelector('input')) return;
+  const key = td.dataset.fxKey;
+  const currentVal = FX_RATES[key] || '';
+
+  td.classList.add('editing');
+  td.innerHTML = `<input type="number" step="0.01" class="cell-input" value="${currentVal}" placeholder="0.00" style="width:60px;" />`;
+  const input = td.querySelector('input');
+  input.focus();
+  input.select();
+
+  let finished = false;
+  function finish(save) {
+    if (finished) return;
+    finished = true;
+    if (save) {
+      const raw = input.value.trim();
+      if (raw === '') {
+        delete FX_RATES[key];
+      } else {
+        const newVal = parseFloat(raw);
+        if (!isNaN(newVal) && newVal > 0) {
+          FX_RATES[key] = Math.round(newVal * 10000) / 10000;
+          supabase.from('fx_rates').upsert({ year_month: key, rate: FX_RATES[key], is_real: true })
+            .then(({ error }) => { if (error) showToast('Failed to save FX rate', 'error'); });
+        }
+      }
+    }
+    renderOfficeExpenses();
+  }
+
+  input.addEventListener('blur', () => finish(true));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    else if (e.key === 'Tab') finish(true);
+  });
+}
+
 // ─── Expose to window for onclick handlers ───
 
+function updateAmountLabel() {
+  const radio = document.querySelector('input[name="newLineBucket"]:checked');
+  const label = document.getElementById('newLineAmountLabel');
+  if (radio && label) {
+    const bucket = EXPENSE_BUCKETS.find(b => b.name === radio.value);
+    label.textContent = `Amount (${bucket && bucket.currency === 'MXN' ? 'MXN' : 'USD'})`;
+  }
+}
+
+window._updateAmountLabel = updateAmountLabel;
+window._editFxCellInline = editFxCellInline;
 window._toggleBucketCollapsed = toggleBucketCollapsed;
 window._toggleExpYear = toggleExpYear;
 window._toggleExpCategory = toggleExpCategory;
 window._toggleExpenseView = toggleExpenseView;
+window._toggleMonthCompare = toggleMonthCompare;
 window._toggleExpCategoryActive = toggleExpCategoryActive;
 window._toggleExpShowInactive = toggleExpShowInactive;
 window._editExpCell = editExpCell;
@@ -1783,8 +2055,7 @@ window._closeAmexPreview = closeAmexPreview;
 window._commitAmexImport = commitAmexImport;
 window._toggleAmexPreviewRow = toggleAmexPreviewRow;
 window._updateAmexPreviewCat = updateAmexPreviewCat;
-window._projectOfficeExpensesRestOfYear = projectOfficeExpensesRestOfYear;
-window._clearOfficeExpenseProjections = clearOfficeExpenseProjections;
+window._toggleExpProjection = toggleExpProjection;
 window._setExpGranularity = setExpGranularity;
 window._setExpChartType = setExpChartType;
 window._setExpChartRange = setExpChartRange;
@@ -1793,3 +2064,8 @@ window._closeLearnPatternModal = closeLearnPatternModal;
 window._confirmLearnPattern = confirmLearnPattern;
 window._closeNewLineFromPreview = closeNewLineFromPreview;
 window._confirmNewLineFromPreview = confirmNewLineFromPreview;
+
+// Re-render when FX rates change (e.g. from the FX editor)
+window.addEventListener('fx-rates-changed', () => {
+  if (_dataLoaded) renderOfficeExpenses();
+});
