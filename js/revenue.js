@@ -23,7 +23,8 @@ const revState = {
   banksOpen: new Set(),
   visibleBanks: new Set(['ML', 'JPM', 'UBS', 'GS']),
   inactiveOverrides: new Map(),
-  showInactive: false
+  showInactive: false,
+  monthCompare: 'yoy'
 };
 
 const chartState = {
@@ -367,6 +368,11 @@ function expandAllYears() {
 function collapseAllYears() {
   revState.yearsOpen = new Set();
   renderRevenue();
+}
+
+function toggleRevMonthCompare() {
+  revState.monthCompare = revState.monthCompare === 'yoy' ? 'mom' : 'yoy';
+  renderRevenueFoot();
 }
 
 // ─── Projections ───
@@ -720,35 +726,52 @@ function renderRevenueFoot() {
   totalHtml += `<td class="grand-total-cell num display-num${pcG}" style="font-size:16px;">${fmtTotal(grandTotal())}</td>`;
   totalHtml += '</tr>';
 
-  // YoY row
+  // Growth comparison helpers
+  const anyExpanded = YEARS.some(y => revState.yearsOpen.has(y));
+  const mode = revState.monthCompare;
+
+  function growthCell(cur, prev, extraCls) {
+    if (prev > 0) {
+      const pct = ((cur - prev) / prev) * 100;
+      const cls = pct >= 0 ? 'yoy-pos' : 'yoy-neg';  // For revenue: up = good
+      const arrow = pct >= 0 ? '\u25B2' : '\u25BC';
+      return `<td class="${extraCls} num ${cls}">${arrow} ${pct.toFixed(1)}%</td>`;
+    }
+    if (cur > 0) return `<td class="${extraCls} num yoy-na">new</td>`;
+    return `<td class="${extraCls} num yoy-na">\u2014</td>`;
+  }
+
+  function getCompMonth(y, m, yi) {
+    if (mode === 'yoy') {
+      return yi > 0 ? totalMonth(YEARS[yi - 1], m) : 0;
+    } else {
+      if (m > 1) return totalMonth(y, m - 1);
+      return yi > 0 ? totalMonth(YEARS[yi - 1], 12) : 0;
+    }
+  }
+
+  const yoyLabel = mode === 'yoy' ? 'vs same month last year' : 'vs previous month';
+  const toggleHtml = anyExpanded
+    ? `<span style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted;" onclick="window._toggleRevMonthCompare()" title="Click to switch">${yoyLabel}</span>`
+    : '% vs prev year';
+
   let yoyHtml = '<tr class="yoy-row">';
   yoyHtml += '<td class="sticky-col"></td>';
-  yoyHtml += '<td class="sticky-col-2">% vs prev year</td>';
+  yoyHtml += `<td class="sticky-col-2">${toggleHtml}</td>`;
 
-  YEARS.forEach((y, i) => {
+  YEARS.forEach((y, yi) => {
     const cur = totalYear(y);
-    const prev = i > 0 ? totalYear(YEARS[i - 1]) : 0;
+    const prev = yi > 0 ? totalYear(YEARS[yi - 1]) : 0;
 
     if (revState.yearsOpen.has(y)) {
-      for (let m = 1; m <= 12; m++) yoyHtml += '<td></td>';
-
-      if (prev > 0) {
-        const pct = ((cur - prev) / prev) * 100;
-        const cls = pct >= 0 ? 'yoy-pos' : 'yoy-neg';
-        const arrow = pct >= 0 ? '\u25B2' : '\u25BC';
-        yoyHtml += `<td class="year-total-cell num ${cls}">${arrow} ${pct.toFixed(1)}%</td>`;
-      } else {
-        yoyHtml += '<td class="year-total-cell num yoy-na">\u2014</td>';
+      for (let m = 1; m <= 12; m++) {
+        const curM = totalMonth(y, m);
+        const prevM = getCompMonth(y, m, yi);
+        yoyHtml += growthCell(curM, prevM, '');
       }
+      yoyHtml += growthCell(cur, prev, 'year-total-cell');
     } else {
-      if (prev > 0) {
-        const pct = ((cur - prev) / prev) * 100;
-        const cls = pct >= 0 ? 'yoy-pos' : 'yoy-neg';
-        const arrow = pct >= 0 ? '\u25B2' : '\u25BC';
-        yoyHtml += `<td class="num ${cls}">${arrow} ${pct.toFixed(1)}%</td>`;
-      } else {
-        yoyHtml += '<td class="num yoy-na">\u2014</td>';
-      }
+      yoyHtml += growthCell(cur, prev, '');
     }
   });
 
@@ -1226,3 +1249,4 @@ window._clearRevenueProjections = clearRevenueProjections;
 window._setGranularity = setGranularity;
 window._setChartType = setChartType;
 window._setChartRange = setChartRange;
+window._toggleRevMonthCompare = toggleRevMonthCompare;

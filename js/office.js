@@ -865,8 +865,21 @@ function editExpCell(td) {
   const monthKey = td.dataset.monthKey;
   if (!subcat || !monthKey) return;
 
-  const line = getLine(subcat);
-  if (!line) return;
+  let line = getLine(subcat);
+  if (!line) {
+    // Auto-create line for subcategories defined in EXPENSE_BUCKETS but not yet in DB
+    line = { name: subcat, monthly: {}, year_totals: {}, grand_total: 0, projectedMonths: [] };
+    EXPENSE_LINES.push(line);
+    const bkt = bucketOf(subcat);
+    supabase.from('office_expense_lines')
+      .insert({ name: subcat, bucket: bkt, is_active: true, display_order: EXPENSE_LINES.length })
+      .select('id')
+      .single()
+      .then(({ data, error }) => {
+        if (!error && data) line._id = data.id;
+        else if (error) showToast('Failed to create line', 'error');
+      });
+  }
 
   const currentVal = line.monthly[monthKey] || 0;
 

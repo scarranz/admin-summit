@@ -268,33 +268,53 @@ function getOvChartData() {
       opIncomeData.push(rev - exp);
       marginData.push(rev > 0 ? ((rev - exp) / rev) * 100 : 0);
     });
-    return { labels, fullLabels: labels.slice(), revData, expData, opIncomeData, marginData };
+    return { labels, fullLabels: labels.slice(), revData, expData, opIncomeData, marginData, projectedFlags: [] };
   }
 
   // Monthly
   const labels = [], fullLabels = [], revData = [], expData = [], opIncomeData = [], marginData = [];
+  const projectedFlags = [];
   const shortMonths = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-  [2022, 2023, 2024, 2025, 2026].forEach(y => {
+  // Determine the 3 forward months after last complete month
+  const fwdMonths = [];
+  for (let i = 1; i <= 3; i++) {
+    let fY = lastY, fM = lastM + i;
+    if (fM > 12) { fY += 1; fM -= 12; }
+    fwdMonths.push({ y: fY, m: fM });
+  }
+  function isFwdMonth(y, m) {
+    return fwdMonths.some(f => f.y === y && f.m === m);
+  }
+
+  [2022, 2023, 2024, 2025, 2026, 2027].forEach(y => {
     for (let m = 1; m <= 12; m++) {
-      if (!ovIsInRange(y, m)) continue;
-      if (!isComplete(y, m)) continue;  // skip future months in overview
+      if (!ovIsInRange(y, m) && !isFwdMonth(y, m)) continue;
+      const fwd = isFwdMonth(y, m);
+      if (!isComplete(y, m) && !fwd) continue;
 
       const rev = ovRevenueMonth(y, m);
       const exp = ovExpenseMonth(y, m);
-      if (rev === 0 && exp === 0) continue;  // empty months
+      // For forward months, use last complete month data as fallback
+      const fwdRev = fwd && rev === 0 ? ovRevenueMonth(lastY, lastM) : rev;
+      const fwdExp = fwd && exp === 0 ? ovExpenseMonth(lastY, lastM) : exp;
+      const useRev = fwd ? fwdRev : rev;
+      const useExp = fwd ? fwdExp : exp;
+
+      if (!fwd && useRev === 0 && useExp === 0) continue;  // empty months
 
       const label = m === 1 ? `${shortMonths[m-1]} ${String(y).slice(-2)}` : shortMonths[m-1];
       labels.push(label);
       fullLabels.push(`${shortMonths[m-1]} ${y}`);
-      revData.push(rev);
-      expData.push(exp);
-      opIncomeData.push(rev - exp);
-      marginData.push(rev > 0 ? ((rev - exp) / rev) * 100 : 0);
+      revData.push(useRev);
+      expData.push(useExp);
+      opIncomeData.push(useRev - useExp);
+      marginData.push(useRev > 0 ? ((useRev - useExp) / useRev) * 100 : 0);
+      projectedFlags.push(fwd);
     }
   });
 
-  return { labels, fullLabels, revData, expData, opIncomeData, marginData };
+  return { labels, fullLabels, revData, expData, opIncomeData, marginData, projectedFlags };
 }
 
 function renderOvChart() {
@@ -302,19 +322,60 @@ function renderOvChart() {
   if (!canvas) return;
   destroyChart('overview');
 
-  const { labels, fullLabels, revData, expData, opIncomeData, marginData } = getOvChartData();
+  const { labels, fullLabels, revData, expData, opIncomeData, marginData, projectedFlags } = getOvChartData();
 
   const REV_COLOR = '#1e2d3d';
   const EXP_COLOR = '#a8a49e';
   const OI_COLOR = '#2d6a4f';  // muted green
   const MARGIN_COLOR = '#1a1a18';  // near-black
 
+  function withAlpha(hex, alpha) {
+    if (hex.startsWith('rgba')) {
+      return hex.replace(/[\d.]+\)$/, alpha + ')');
+    }
+    const r = parseInt(hex.slice(1,3), 16);
+    const g = parseInt(hex.slice(3,5), 16);
+    const b = parseInt(hex.slice(5,7), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
+  // Create diagonal stripe pattern for projected bars (matches table .projected-cell style)
+  function createStripePattern(baseColor, alpha) {
+    const patCanvas = document.createElement('canvas');
+    patCanvas.width = 8;
+    patCanvas.height = 8;
+    const pctx = patCanvas.getContext('2d');
+    pctx.fillStyle = withAlpha(baseColor, alpha);
+    pctx.fillRect(0, 0, 8, 8);
+    pctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    pctx.lineWidth = 1.5;
+    pctx.beginPath();
+    pctx.moveTo(-1, 9); pctx.lineTo(9, -1);
+    pctx.moveTo(-1, 1); pctx.lineTo(1, -1);
+    pctx.moveTo(7, 9); pctx.lineTo(9, 7);
+    pctx.stroke();
+    return canvas.getContext('2d').createPattern(patCanvas, 'repeat');
+  }
+
+  // Per-bar colors: stripe pattern for projected months
+  const hasProj = projectedFlags && projectedFlags.some(p => p);
+  function perBarColors(baseColor, alphaActual, alphaProjected) {
+    if (!hasProj) return typeof alphaActual === 'number' ? withAlpha(baseColor, alphaActual) : baseColor;
+    const solidColor = typeof alphaActual === 'number' ? withAlpha(baseColor, alphaActual) : baseColor;
+    const stripe = createStripePattern(baseColor, alphaProjected);
+    return projectedFlags.map(p => p ? stripe : solidColor);
+  }
+
   // Build datasets conditionally
   const datasets = [];
   if (ovState.series.revenue) {
     datasets.push({
       type: 'bar', label: 'Revenue', data: revData,
-      backgroundColor: REV_COLOR, borderRadius: 3,
+      backgroundColor: perBarColors(REV_COLOR, 1, 0.55),
+      borderColor: hasProj ? projectedFlags.map(p => p ? withAlpha(REV_COLOR, 0.4) : 'transparent') : 'transparent',
+      borderWidth: hasProj ? projectedFlags.map(p => p ? 1 : 0) : 0,
+      borderDash: [3, 3],
+      borderRadius: 3,
       barPercentage: 0.7, categoryPercentage: 0.7,
       yAxisID: 'y', order: 2
     });
@@ -322,7 +383,11 @@ function renderOvChart() {
   if (ovState.series.expenses) {
     datasets.push({
       type: 'bar', label: 'Expenses', data: expData,
-      backgroundColor: 'rgba(168,164,158,0.6)', borderRadius: 3,
+      backgroundColor: perBarColors('rgba(168,164,158,1)', 0.6, 0.4),
+      borderColor: hasProj ? projectedFlags.map(p => p ? 'rgba(168,164,158,0.5)' : 'transparent') : 'transparent',
+      borderWidth: hasProj ? projectedFlags.map(p => p ? 1 : 0) : 0,
+      borderDash: [3, 3],
+      borderRadius: 3,
       barPercentage: 0.7, categoryPercentage: 0.7,
       yAxisID: 'y', order: 2
     });
@@ -330,18 +395,32 @@ function renderOvChart() {
   if (ovState.series.opIncome) {
     datasets.push({
       type: 'bar', label: 'Operating income', data: opIncomeData,
-      backgroundColor: OI_COLOR, borderRadius: 3,
+      backgroundColor: perBarColors(OI_COLOR, 1, 0.55),
+      borderColor: hasProj ? projectedFlags.map(p => p ? withAlpha(OI_COLOR, 0.4) : 'transparent') : 'transparent',
+      borderWidth: hasProj ? projectedFlags.map(p => p ? 1 : 0) : 0,
+      borderDash: [3, 3],
+      borderRadius: 3,
       barPercentage: 0.7, categoryPercentage: 0.7,
       yAxisID: 'y', order: 2
     });
   }
   if (ovState.series.margin) {
+    // Dashed line segment for projected portion
+    const projSegment = hasProj
+      ? { borderDash: (ctx) => projectedFlags[ctx.p1DataIndex] ? [4, 4] : [] }
+      : undefined;
     datasets.push({
       type: 'line', label: 'Operating margin', data: marginData,
       borderColor: MARGIN_COLOR, backgroundColor: MARGIN_COLOR,
-      borderWidth: 2, pointRadius: 3, pointHoverRadius: 5,
-      pointBackgroundColor: MARGIN_COLOR, tension: 0.32,
-      yAxisID: 'y1', order: 1
+      borderWidth: 2,
+      pointRadius: hasProj ? projectedFlags.map(p => p ? 2 : 3) : 3,
+      pointHoverRadius: 5,
+      pointBackgroundColor: hasProj
+        ? projectedFlags.map(p => p ? withAlpha(MARGIN_COLOR, 0.4) : MARGIN_COLOR) : MARGIN_COLOR,
+      pointStyle: hasProj ? projectedFlags.map(p => p ? 'rectRot' : 'circle') : 'circle',
+      tension: 0.32,
+      yAxisID: 'y1', order: 1,
+      segment: projSegment
     });
   }
 
