@@ -94,6 +94,7 @@ create table revenue_cells (
   year_month   text not null,               -- 'YYYY-MM' or '2022-00' for annual
   amount       numeric(12, 2) not null,
   is_projected boolean default false,
+  source       text default 'manual' check (source in ('manual', 'api', 'projection')),
   updated_at   timestamptz default now(),
   primary key (account_id, year_month)
 );

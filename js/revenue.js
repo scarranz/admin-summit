@@ -139,7 +139,8 @@ async function persistCell(acct, monthKey, value) {
           account_id: acct.id,
           year_month: monthKey,
           amount: value,
-          is_projected: false
+          is_projected: false,
+          source: 'manual'
         }, { onConflict: 'account_id,year_month' });
     }
   } catch (e) {
@@ -167,7 +168,8 @@ async function persistYearTotal(acct, year, value) {
           account_id: acct.id,
           year_month: monthKey,
           amount: value,
-          is_projected: false
+          is_projected: false,
+          source: 'manual'
         }, { onConflict: 'account_id,year_month' });
     }
   } catch (e) {
@@ -185,7 +187,8 @@ async function persistProjections(acct) {
       account_id: acct.id,
       year_month: k,
       amount: acct.monthly[k] || 0,
-      is_projected: true
+      is_projected: true,
+      source: 'projection'
     }));
     if (rows.length > 0) {
       await supabase
