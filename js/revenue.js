@@ -575,13 +575,13 @@ function renderRevenueBody() {
         const rowCls = active ? 'acct-row' : 'acct-row acct-inactive';
         const safeAcct = acc.account.replace(/'/g, "\\'");
         const safeAcctAttr = acc.account.replace(/"/g, '&quot;');
-        const toggleBtn = `<button class="acct-toggle ${active ? 'is-active' : 'is-inactive'}"
+        const toggleBtn = `<button class="line-toggle-btn"
           onclick="event.stopPropagation(); window._toggleAccountActive('${bank}', '${safeAcct}')"
-          title="${active ? 'Mark as inactive' : 'Mark as active'}">${active ? '\u25CF' : '\u25CB'}</button>`;
+          title="${active ? 'Hide' : 'Show'}">${active ? 'hide' : 'show'}</button>`;
 
-        html += `<tr class="${rowCls}">`;
+        html += `<tr class="${rowCls} subcat-row">`;
         html += '<td class="sticky-col"></td>';
-        html += `<td class="sticky-col-2">${toggleBtn}${acc.account}</td>`;
+        html += `<td class="sticky-col-2"><div class="subcat-inner"><span class="subcat-name">${acc.account}</span><span class="subcat-actions">${toggleBtn}</span></div></td>`;
 
         YEARS.forEach(y => {
           if (revState.yearsOpen.has(y)) {
