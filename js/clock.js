@@ -337,9 +337,15 @@ function clkRenderMonthFilters() {
 }
 
 function clkSelectYear(y) {
-  if (y === 'all') clkSelectedMonth = 'all';
-  else if (y === 'ytd') clkSelectedMonth = 'ytd';
-  else clkSelectedMonth = y;
+  if (y === 'all') {
+    clkSelectedMonth = clkSelectedMonth === 'all' ? 'ytd' : 'all';
+  } else if (y === 'ytd') {
+    clkSelectedMonth = 'ytd';
+  } else {
+    // If clicking the same year that's already active, collapse back to YTD
+    const currentYear = clkSelectedMonth.slice(0,4);
+    clkSelectedMonth = (currentYear === y) ? 'ytd' : y;
+  }
   clkRenderMonthFilters();
   clkRenderAll();
 }
