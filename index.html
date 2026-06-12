@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="css/tables.css">
 <link rel="stylesheet" href="css/charts.css">
 <link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/clock.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 </head>
@@ -59,6 +60,10 @@
             <span>Office Expenses</span>
           </div>
         </div>
+      </div>
+      <div class="nav-item" data-page="clock" onclick="window._nav('clock')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Clock
       </div>
     </nav>
 
@@ -317,10 +322,108 @@
       </div>
     </section>
 
+    <!-- ═══ CLOCK ═══ -->
+    <section class="page" id="page-clock">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Clock</div>
+          <div class="page-sub">Attendance tracking · EcoTime data</div>
+        </div>
+        <div class="page-actions">
+          <button class="btn btn-outline btn-sm" onclick="window._clkExpandAllYears()">Expand all years</button>
+          <button class="btn btn-outline btn-sm" onclick="window._clkCollapseAllYears()">Collapse all</button>
+          <label class="btn btn-outline btn-sm" style="cursor:pointer;">
+            <span style="margin-right:4px;">&#8593;</span> Upload CSV
+            <input type="file" accept=".csv" style="display:none;" onchange="window._clkPreviewCSV(event)">
+          </label>
+        </div>
+      </div>
+
+      <!-- Month/Year Filters -->
+      <div class="clock-filters" id="clkMonthFilters"></div>
+
+      <!-- Params Bar -->
+      <div class="clock-params">
+        <div class="clock-param">
+          <span class="clock-param-label">Entry time</span>
+          <input class="clock-param-input" id="clk_entry" value="07:00" oninput="window._clkRenderAll()">
+        </div>
+        <div class="clock-param">
+          <span class="clock-param-label">Tolerance</span>
+          <input class="clock-param-input" id="clk_tol" value="15" oninput="window._clkRenderAll()" style="width:42px"> min
+        </div>
+        <div class="clock-param">
+          <span class="clock-param-label">Min hours/day</span>
+          <input class="clock-param-input" id="clk_minhrs" value="8" oninput="window._clkRenderAll()" style="width:42px"> h
+        </div>
+        <span class="clock-params-note">IN after 12 PM &#8594; treated as OUT · Duplicate IN &#8594; earliest kept</span>
+      </div>
+
+      <!-- Employee Table -->
+      <div class="clock-table-card">
+        <div class="clock-table-header">
+          <div class="clock-th">Employee</div>
+          <div class="clock-th">Attendance</div>
+          <div class="clock-th">On Time</div>
+          <div class="clock-th">Avg Arrival</div>
+          <div class="clock-th">Avg Hours</div>
+          <div class="clock-th">Absences</div>
+          <div class="clock-th">Missing OUT</div>
+        </div>
+        <div id="clkTableBody"></div>
+        <div class="clock-toggle-row" id="clkToggleRow" style="display:none;">
+          <button class="btn btn-outline btn-sm" id="clkToggleRowBtn" onclick="window._clkToggleShowInactive()">Show inactive</button>
+          <div style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--t3);">
+            Per-employee:
+            <div class="clock-toggle-group" id="clkToggleGroup"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hours filter bar -->
+      <div class="bank-filter" style="margin-top:20px;">
+        <span class="bank-filter-label">&nbsp;</span>
+        <div class="bank-filter-pills"></div>
+        <button class="inactive-link" onclick="window._clkToggleTableInactive()" id="clkTableInactiveBtn">Show inactive</button>
+      </div>
+
+      <!-- Hours Table (revenue-style) -->
+      <div class="rev-table-wrap" style="margin-top: 20px;">
+        <div class="rev-table-scroll">
+          <table class="rev-tbl" id="clkHoursTable">
+            <thead id="clkHoursHead"></thead>
+            <tbody id="clkHoursBody"></tbody>
+            <tfoot id="clkHoursFoot"></tfoot>
+          </table>
+        </div>
+      </div>
+
+      <!-- CSV Preview Modal -->
+      <div class="clock-modal-overlay" id="clkModal">
+        <div class="clock-modal">
+          <div class="clock-modal-header">
+            <div class="clock-modal-title" id="clkModalTitle">Preview changes</div>
+            <button class="clock-modal-close" onclick="window._clkCloseModal()">&times;</button>
+          </div>
+          <div class="clock-modal-body" id="clkModalBody"></div>
+          <div class="clock-modal-footer">
+            <span class="clock-modal-summary" id="clkModalSummary"></span>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-outline btn-sm" onclick="window._clkCloseModal()">Cancel</button>
+              <button class="btn btn-primary btn-sm" onclick="window._clkConfirmUpload()">Import</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="clock-notif" id="clkNotif"></div>
+    </section>
+
   </div><!-- .main -->
 </div><!-- .app -->
 
 <script src="env.js"></script>
+<script src="js/clock-data.js"></script>
 <script type="module">
 import { initAuth, getCurrentUser, signOut } from './js/auth.js';
 import { loadFxRates } from './js/fx.js';
@@ -329,6 +432,7 @@ import { loadRevenuePage } from './js/revenue.js';
 import { loadPayrollPage } from './js/payroll.js';
 import { loadOfficePage } from './js/office.js';
 import { loadOverviewPage } from './js/overview.js';
+import { loadClockPage } from './js/clock.js';
 
 const statusEl = document.getElementById('status');
 
@@ -347,6 +451,7 @@ async function boot() {
       registerPageLoader('revenue', loadRevenuePage);
       registerPageLoader('payroll', loadPayrollPage);
       registerPageLoader('office', loadOfficePage);
+      registerPageLoader('clock', loadClockPage);
 
       // Show app, hide loading
       document.getElementById('loadingWrap').style.display = 'none';

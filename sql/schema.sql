@@ -207,32 +207,32 @@ create policy "fx_rates_delete" on fx_rates
   for delete using (current_user_role() in ('san', 'deborah'));
 
 
--- ── revenue_accounts: san only ──
+-- ── revenue_accounts: san + deborah ──
 create policy "revenue_accounts_read" on revenue_accounts
-  for select using (current_user_role() = 'san');
+  for select using (current_user_role() in ('san', 'deborah'));
 
 create policy "revenue_accounts_write" on revenue_accounts
-  for insert with check (current_user_role() = 'san');
+  for insert with check (current_user_role() in ('san', 'deborah'));
 
 create policy "revenue_accounts_update" on revenue_accounts
-  for update using (current_user_role() = 'san');
+  for update using (current_user_role() in ('san', 'deborah'));
 
 create policy "revenue_accounts_delete" on revenue_accounts
-  for delete using (current_user_role() = 'san');
+  for delete using (current_user_role() in ('san', 'deborah'));
 
 
--- ── revenue_cells: san only ──
+-- ── revenue_cells: san + deborah ──
 create policy "revenue_cells_read" on revenue_cells
-  for select using (current_user_role() = 'san');
+  for select using (current_user_role() in ('san', 'deborah'));
 
 create policy "revenue_cells_write" on revenue_cells
-  for insert with check (current_user_role() = 'san');
+  for insert with check (current_user_role() in ('san', 'deborah'));
 
 create policy "revenue_cells_update" on revenue_cells
-  for update using (current_user_role() = 'san');
+  for update using (current_user_role() in ('san', 'deborah'));
 
 create policy "revenue_cells_delete" on revenue_cells
-  for delete using (current_user_role() = 'san');
+  for delete using (current_user_role() in ('san', 'deborah'));
 
 
 -- ── payroll_employees: san only ──
