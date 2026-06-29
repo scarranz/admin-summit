@@ -1,0 +1,6 @@
+# Require San's approval for sensitive files
+# These protect auth, payroll UI, and database schema/RLS policies
+
+js/auth.js       @sant
+js/payroll.js    @sant
+sql/             @sant
