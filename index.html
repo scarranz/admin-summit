@@ -329,101 +329,251 @@
           <div class="page-title">Clock</div>
           <div class="page-sub">Attendance tracking · EcoTime data</div>
         </div>
-        <div class="page-actions">
-          <button class="btn btn-outline btn-sm" onclick="window._clkExpandAllYears()">Expand all years</button>
-          <button class="btn btn-outline btn-sm" onclick="window._clkCollapseAllYears()">Collapse all</button>
-          <label class="btn btn-outline btn-sm" style="cursor:pointer;">
-            <span style="margin-right:4px;">&#8593;</span> Upload CSV
-            <input type="file" accept=".csv" style="display:none;" onchange="window._clkPreviewCSV(event)">
+        <div class="page-actions" style="display:flex;align-items:center;gap:8px;">
+          <div class="clk-nav-tabs">
+            <button class="clk-nav-tab active" id="tab-clock" onclick="switchTab('clock')">Clock</button>
+            <button class="clk-nav-tab" id="tab-calendar" onclick="switchTab('calendar')">Calendar</button>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="openHistoryModal()" title="View uploaded files">History</button>
+          <label class="btn btn-outline btn-sm" style="cursor:pointer;" title="Upload EcoTime CSV">
+            &#8593; Upload CSV
+            <input type="file" accept=".csv" style="display:none;" onchange="previewCSV(event)">
           </label>
         </div>
       </div>
 
-      <!-- Month/Year Filters -->
-      <div class="clock-filters" id="clkMonthFilters"></div>
-
-      <!-- Params Bar -->
-      <div class="clock-params">
-        <div class="clock-param">
-          <span class="clock-param-label">Entry time</span>
-          <input class="clock-param-input" id="clk_entry" value="07:00" oninput="window._clkRenderAll()">
-        </div>
-        <div class="clock-param">
-          <span class="clock-param-label">Tolerance</span>
-          <input class="clock-param-input" id="clk_tol" value="15" oninput="window._clkRenderAll()" style="width:42px"> min
-        </div>
-        <div class="clock-param">
-          <span class="clock-param-label">Min hours/day</span>
-          <input class="clock-param-input" id="clk_minhrs" value="8" oninput="window._clkRenderAll()" style="width:42px"> h
-        </div>
-        <span class="clock-params-note">IN after 12 PM &#8594; treated as OUT · Duplicate IN &#8594; earliest kept</span>
+      <!-- Month filters (Clock tab only) -->
+      <div class="clk-filter-bar" id="clkFilterBar">
+        <div id="monthFilters"></div>
       </div>
 
-      <!-- Employee Table -->
-      <div class="clock-table-card">
-        <div class="clock-table-header">
-          <div class="clock-th">Employee</div>
-          <div class="clock-th">Attendance</div>
-          <div class="clock-th">On Time</div>
-          <div class="clock-th">Avg Arrival</div>
-          <div class="clock-th">Avg Hours</div>
-          <div class="clock-th">Absences</div>
-          <div class="clock-th">Missing OUT</div>
-        </div>
-        <div id="clkTableBody"></div>
-        <div class="clock-toggle-row" id="clkToggleRow" style="display:none;">
-          <button class="btn btn-outline btn-sm" id="clkToggleRowBtn" onclick="window._clkToggleShowInactive()">Show inactive</button>
-          <div style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--t3);">
-            Per-employee:
-            <div class="clock-toggle-group" id="clkToggleGroup"></div>
+      <!-- EDIT RECORD MODAL -->
+      <div class="modal-overlay" id="editRecModal">
+        <div class="edit-rec-modal">
+          <div class="edit-rec-title" id="editRecTitle">Edit Record</div>
+          <div class="edit-rec-sub" id="editRecSub"></div>
+          <div class="edit-rec-grid">
+            <div class="edit-rec-fg"><label>Time IN</label><input class="edit-rec-inp" id="editRecIn" placeholder="e.g. 07:15 AM"></div>
+            <div class="edit-rec-fg"><label>Time OUT</label><input class="edit-rec-inp" id="editRecOut" placeholder="e.g. 04:30 PM"></div>
+          </div>
+          <div class="edit-rec-foot">
+            <button class="btn-secondary" onclick="document.getElementById('editRecModal').classList.remove('open')">Cancel</button>
+            <button class="btn-primary" onclick="saveRecordEdit()">Save</button>
           </div>
         </div>
       </div>
 
-      <!-- Hours filter bar -->
-      <div class="bank-filter" style="margin-top:20px;">
-        <span class="bank-filter-label">&nbsp;</span>
-        <div class="bank-filter-pills"></div>
-        <button class="inactive-link" onclick="window._clkToggleTableInactive()" id="clkTableInactiveBtn">Show inactive</button>
-      </div>
-
-      <!-- Hours Table (revenue-style) -->
-      <div class="rev-table-wrap" style="margin-top: 20px;">
-        <div class="rev-table-scroll">
-          <table class="rev-tbl" id="clkHoursTable">
-            <thead id="clkHoursHead"></thead>
-            <tbody id="clkHoursBody"></tbody>
-            <tfoot id="clkHoursFoot"></tfoot>
-          </table>
+      <!-- INACTIVE EMPLOYEES MODAL -->
+      <div class="modal-overlay" id="inactiveModal">
+        <div class="modal" style="max-height:75vh;display:flex;flex-direction:column">
+          <div class="modal-header">
+            <div class="modal-title">Inactive Employees</div>
+            <button class="modal-close" onclick="document.getElementById('inactiveModal').classList.remove('open')">×</button>
+          </div>
+          <div class="modal-body" style="padding:0;overflow-y:auto;flex:1" id="inactiveModalBody"></div>
         </div>
       </div>
 
-      <!-- CSV Preview Modal -->
-      <div class="clock-modal-overlay" id="clkModal">
-        <div class="clock-modal">
-          <div class="clock-modal-header">
-            <div class="clock-modal-title" id="clkModalTitle">Preview changes</div>
-            <button class="clock-modal-close" onclick="window._clkCloseModal()">&times;</button>
+      <!-- MANAGE EMPLOYEES MODAL -->
+      <div class="modal-overlay" id="manageModal">
+        <div class="modal" style="max-height:80vh;display:flex;flex-direction:column">
+          <div class="modal-header">
+            <div class="modal-title">Manage Employees</div>
+            <button class="modal-close" onclick="document.getElementById('manageModal').classList.remove('open')">×</button>
           </div>
-          <div class="clock-modal-body" id="clkModalBody"></div>
-          <div class="clock-modal-footer">
-            <span class="clock-modal-summary" id="clkModalSummary"></span>
+          <div style="padding:12px 20px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;background:var(--s2)">
+            <input class="edit-rec-inp" id="newEmpName" placeholder="Full name" style="flex:1">
+            <button class="btn-primary" onclick="addManualEmployee()" style="white-space:nowrap">+ Add</button>
+          </div>
+          <div class="modal-body" style="padding:0;overflow-y:auto;flex:1" id="manageModalBody"></div>
+        </div>
+      </div>
+
+      <!-- FILE HISTORY MODAL -->
+      <div class="modal-overlay" id="histModal">
+        <div class="modal" style="max-height:80vh;display:flex;flex-direction:column">
+          <div class="modal-header">
+            <div class="modal-title">Uploaded Files</div>
+            <button class="modal-close" onclick="document.getElementById('histModal').classList.remove('open')">×</button>
+          </div>
+          <div class="modal-body" style="padding:0;overflow-y:auto;flex:1" id="histModalBody"></div>
+        </div>
+      </div>
+
+      <!-- CSV PREVIEW MODAL -->
+      <div class="modal-overlay" id="csvModal">
+        <div class="modal">
+          <div class="modal-header">
+            <div class="modal-title" id="modalTitle">Preview changes</div>
+            <button class="modal-close" onclick="closeModal()">×</button>
+          </div>
+          <div class="modal-body" id="modalBody"></div>
+          <div class="modal-footer">
+            <span class="modal-summary" id="modalSummary"></span>
             <div style="display:flex;gap:8px;">
-              <button class="btn btn-outline btn-sm" onclick="window._clkCloseModal()">Cancel</button>
-              <button class="btn btn-primary btn-sm" onclick="window._clkConfirmUpload()">Import</button>
+              <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+              <button class="btn-primary" onclick="confirmUpload()">Import</button>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="clock-notif" id="clkNotif"></div>
+      <!-- BIRTHDAY ADD MODAL -->
+      <div class="bday-overlay" id="bdayAddModal">
+        <div class="bday-modal">
+          <div class="bday-modal-title">Add Birthday</div>
+          <div class="bday-fr2">
+            <div class="bday-fg"><label>Full name</label><input type="text" class="bday-inp" id="bdayName" placeholder="First Last"></div>
+            <div class="bday-fg"><label>Date of birth</label><input type="date" class="bday-inp" id="bdayDOB"></div>
+          </div>
+          <div class="bday-fr2">
+            <div class="bday-fg"><label>Type</label><select class="bday-inp" id="bdayType"><option value="Inversionista">Investor</option><option value="Empleado">Employee</option></select></div>
+            <div class="bday-fg"><label>Email (optional)</label><input type="email" class="bday-inp" id="bdayEmail"></div>
+          </div>
+          <div class="bday-modal-foot">
+            <button class="btn-secondary" onclick="document.getElementById('bdayAddModal').classList.remove('open')">Cancel</button>
+            <button class="btn-primary" onclick="addBday()">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- BIRTHDAY POPOVER -->
+      <div class="bday-popover" id="bdayPopover"></div>
+
+      <!-- SECTION: CLOCK -->
+      <div class="cal-section active" id="section-clock">
+        <div class="params-bar">
+          <div class="param-item">
+            <span class="param-label">Entry time</span>
+            <input class="param-input" id="p_entry" value="07:00" oninput="renderAll()">
+          </div>
+          <div class="param-item">
+            <span class="param-label">Tolerance</span>
+            <input class="param-input" id="p_tol" value="15" oninput="renderAll()" style="width:42px"> min
+          </div>
+          <div class="param-item">
+            <span class="param-label">Min hours/day</span>
+            <input class="param-input" id="p_minhrs" value="8" oninput="renderAll()" style="width:42px"> h
+          </div>
+          <span class="params-note">IN after 12 PM → treated as OUT · Duplicate IN → earliest kept</span>
+        </div>
+
+        <div class="table-card">
+          <div class="metric-toggle-bar">
+            <div class="metric-tabs">
+              <button class="metric-tab active" id="mtab-all" onclick="setMetric('all',this)">All</button>
+              <button class="metric-tab" id="mtab-attendance" onclick="setMetric('attendance',this)">Attendance</button>
+              <button class="metric-tab" id="mtab-arrival" onclick="setMetric('arrival',this)">Avg Arrival</button>
+              <button class="metric-tab" id="mtab-missing" onclick="setMetric('missing',this)">Missing Days</button>
+            </div>
+            <button class="btn-secondary" onclick="openManageModal()" style="font-size:11px;padding:4px 12px;">Manage employees</button>
+          </div>
+          <div class="table-header-row" id="empTableHeader"></div>
+          <div id="empTableBody"></div>
+          <div class="inactive-toggle-row" id="toggleRow" style="display:none;">
+            <button class="btn-secondary" id="toggleRowBtn" onclick="openInactiveModal()" style="font-size:11px;padding:3px 10px;"></button>
+          </div>
+        </div>
+      </div><!-- /section-clock -->
+
+      <!-- SECTION: CALENDAR -->
+      <div class="cal-section" id="section-calendar">
+        <div class="bday-layout">
+          <div class="bday-panel">
+            <div class="bday-panel-hdr">
+              <div class="bday-panel-title">Upcoming</div>
+              <div class="bday-panel-sub">Next 30 days</div>
+            </div>
+            <div class="bday-upcoming-list" id="bdayUpcomingList"></div>
+          </div>
+          <div class="bday-cal-card">
+            <div class="bday-cal-hdr">
+              <div style="display:flex;align-items:center;gap:10px">
+                <div class="bday-view-toggle">
+                  <button class="bday-vtoggle active" id="vtoggleMonth" onclick="setCalView('month')">Month</button>
+                  <button class="bday-vtoggle" id="vtoggleYear" onclick="setCalView('year')">Year</button>
+                </div>
+                <div class="bday-month-nav" id="bdayMonthNavWrap">
+                  <button class="bday-nav-btn" onclick="changeBdayMonth(-1)">&#8249;</button>
+                  <div class="bday-month-lbl" id="bdayMonthLbl"></div>
+                  <button class="bday-nav-btn" onclick="changeBdayMonth(1)">&#8250;</button>
+                </div>
+                <div class="bday-month-nav" id="bdayYearNavWrap" style="display:none">
+                  <button class="bday-nav-btn" onclick="changeBdayYear(-1)">&#8249;</button>
+                  <div class="bday-month-lbl" id="bdayYearLbl"></div>
+                  <button class="bday-nav-btn" onclick="changeBdayYear(1)">&#8250;</button>
+                </div>
+              </div>
+              <div class="bday-filter-pills" id="bdayFilterWrap">
+                <button class="bday-pill active" onclick="setBdayFilter('all',this)">All</button>
+                <button class="bday-pill" onclick="setBdayFilter('Inversionista',this)">Investors</button>
+                <button class="bday-pill" onclick="setBdayFilter('Empleado',this)">Employees</button>
+              </div>
+            </div>
+            <div id="bdayMonthView">
+              <div class="bday-cal-body">
+                <div class="bday-dow-hdr">
+                  <div class="bday-dow-lbl">Sun</div><div class="bday-dow-lbl">Mon</div>
+                  <div class="bday-dow-lbl">Tue</div><div class="bday-dow-lbl">Wed</div>
+                  <div class="bday-dow-lbl">Thu</div><div class="bday-dow-lbl">Fri</div>
+                  <div class="bday-dow-lbl">Sat</div>
+                </div>
+                <div class="bday-grid" id="bdayGrid"></div>
+                <div class="bday-legend">
+                  <div class="bday-leg-item"><div class="bday-leg-dot" style="background:#1d4ed8"></div>Investor</div>
+                  <div class="bday-leg-item"><div class="bday-leg-dot" style="background:var(--late)"></div>Employee</div>
+                  <div class="bday-leg-item"><div class="bday-leg-sq"></div>NYSE Holiday</div>
+                </div>
+              </div>
+            </div>
+            <div id="bdayYearView" style="display:none">
+              <div class="bday-annual-grid" id="bdayAnnualGrid"></div>
+              <div class="bday-legend" style="padding:0 16px 14px">
+                <div class="bday-leg-item"><div class="bday-leg-dot" style="background:#1d4ed8"></div>Birthday</div>
+                <div class="bday-leg-item"><div class="bday-leg-sq"></div>NYSE Holiday</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="bday-tbl-card">
+          <div class="bday-tbl-hdr">
+            <div class="bday-tbl-tabs">
+              <button class="bday-tbl-tab active" onclick="setTblView('birthdays',this)">Birthdays</button>
+              <button class="bday-tbl-tab" onclick="setTblView('holidays',this)">NYSE Holidays</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <input type="text" class="bday-search" id="bdaySearch" placeholder="Search..." oninput="onBdaySearch()">
+              <span class="bday-tbl-count" id="bdayTblCount"></span>
+              <button style="font-size:10px;padding:5px 12px;border-radius:var(--radius);border:none;cursor:pointer;font-family:inherit;background:var(--accent);color:var(--accent-text);font-weight:500" onclick="document.getElementById('bdayAddModal').classList.add('open')">+ Add</button>
+            </div>
+          </div>
+          <div id="bdayTblWrap">
+            <table class="bday-table" id="bdayBdayTable">
+              <thead><tr><th>Name</th><th>Type</th><th>Birthday</th><th>Age</th><th>Days until</th><th></th></tr></thead>
+              <tbody id="bdayTblBody"></tbody>
+            </table>
+            <table class="bday-table" id="bdayHolidayTable" style="display:none">
+              <thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th>Status</th></tr></thead>
+              <tbody id="bdayHolBody"></tbody>
+            </table>
+          </div>
+          <div class="bday-pagination">
+            <button class="bday-page-btn" id="bdayPrevBtn" onclick="bdayPagePrev()">&#8249;</button>
+            <span class="bday-page-info" id="bdayPageInfo"></span>
+            <button class="bday-page-btn" id="bdayNextBtn" onclick="bdayPageNext()">&#8250;</button>
+          </div>
+        </div>
+      </div><!-- /section-calendar -->
+
+      <div class="notif" id="notif"></div>
     </section>
 
   </div><!-- .main -->
 </div><!-- .app -->
 
 <script src="env.js"></script>
-<script src="js/clock-data.js"></script>
+
 <script type="module">
 import { initAuth, getCurrentUser, signOut } from './js/auth.js';
 import { loadFxRates } from './js/fx.js';
