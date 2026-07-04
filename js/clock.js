@@ -1,9 +1,6 @@
-// Clock module — attendance tracking, CSV upload, employee stats
-// Data loaded from Supabase (clock_employees + clock_records)
-// Falls back to clock-data.js (global RAW) for seed/migration
 import { supabase } from './supabase-client.js';
 
-// ── HOLIDAYS ──────────────────────────────────────────────
+// ── NYSE HOLIDAYS 2025–2030 ───────────────────────────────
 const HOLIDAYS = new Set([
   '2025-01-01','2025-01-20','2025-02-17','2025-04-18',
   '2025-05-26','2025-06-19','2025-07-04','2025-09-01',
@@ -52,36 +49,38 @@ const HOLIDAY_NAMES = {
   "2030-12-25":"Christmas",
 };
 
-// ── DEFAULT COLORS (used when creating new employees) ─────
 const DEFAULT_COLORS = {
   'Santiago Carranza':'#3b5bdb','Oscar Cordova':'#099268',
   'Santiago Alvarez':'#e67700','Deborah Posternak':'#c2255c',
   'Pablo Valles':'#7048e8','Frank Rojas':'#c92a2a',
   'Maria Jose Romo':'#a61e4d','Daniel Garibay':'#0c8599',
   'Luis Catan':'#6741d9','Hector Miranda':'#2f9e44',
-  'Daniel Alvarez':'#d9480f'
+  'Daniel Alvarez':'#d9480f',
 };
-const PALETTE = ['#3b5bdb','#099268','#e67700','#c2255c','#7048e8','#c92a2a','#0c8599','#6741d9','#2f9e44','#d9480f','#a61e4d'];
+const COLOR_PALETTE = ['#3b5bdb','#099268','#e67700','#c2255c','#7048e8','#0c8599','#6741d9','#2f9e44','#d9480f','#a61e4d','#1971c2','#5c7a2d'];
 
-// ── STATE ─────────────────────────────────────────────────
-let clkEmployees = {};   // { id: { name, color, is_active } }
-let clkNameToId = {};    // { name: id }
-let clkRecords = [];     // flat array like RAW: { employee, date, day, time_in, time_out, work_hours, missing_out }
-let clkSelectedEmp = null;
-let clkSelectedMonth = 'ytd';
-let clkShowInactive = false;
-let clkPendingCSVRecords = [];
-let clkPendingCSVFile = '';
+// ── SUPABASE STATE ────────────────────────────────────────
+let clkEmployees = {};  // { id: { name, color, is_active } }
+let clkNameToId = {};   // { name: id }
+
+// ── V3 DATA STATE ─────────────────────────────────────────
+let RAW = [];           // flat records array (v3 format)
+let COLORS = {};        // { name: hex }
+let activeStatus = {};  // { name: bool }
+
+// ── OTHER V3 STATE ────────────────────────────────────────
+let selectedEmp = null;
+let selectedMonth = 'ytd';
+let activeMetric = 'all';
+let activeTab = 'clock';
 let CLEAN = {};
 
-// ── SUPABASE DATA LOADING ─────────────────────────────────
+// ── SUPABASE LOADING ──────────────────────────────────────
 async function loadFromSupabase() {
-  // Load employees
   const { data: emps, error: empErr } = await supabase
     .from('clock_employees')
     .select('*')
     .order('display_order');
-
   if (empErr) throw empErr;
 
   clkEmployees = {};
@@ -91,15 +90,13 @@ async function loadFromSupabase() {
     clkNameToId[e.name] = e.id;
   });
 
-  // Load records with employee name joined
   const { data: recs, error: recErr } = await supabase
     .from('clock_records')
     .select('*, clock_employees!inner(name)')
     .order('date', { ascending: true });
-
   if (recErr) throw recErr;
 
-  clkRecords = recs.map(r => ({
+  RAW = recs.map(r => ({
     employee: r.clock_employees.name,
     employee_id: r.employee_id,
     date: r.date,
@@ -111,41 +108,51 @@ async function loadFromSupabase() {
   }));
 }
 
-// Ensure an employee exists in the DB; return their id
-async function ensureEmployee(name) {
+async function ensureEmployee(name, color) {
   if (clkNameToId[name]) return clkNameToId[name];
-
-  const color = DEFAULT_COLORS[name] || PALETTE[Object.keys(clkNameToId).length % PALETTE.length];
+  const empColor = color || DEFAULT_COLORS[name] || COLOR_PALETTE[Object.keys(clkNameToId).length % COLOR_PALETTE.length];
   const { data, error } = await supabase
     .from('clock_employees')
-    .upsert({ name, color, is_active: true }, { onConflict: 'name' })
+    .upsert({ name, color: empColor, is_active: true }, { onConflict: 'name' })
     .select()
     .single();
-
   if (error) throw error;
   clkEmployees[data.id] = { name: data.name, color: data.color, is_active: data.is_active };
   clkNameToId[data.name] = data.id;
+  COLORS[data.name] = data.color;
+  activeStatus[data.name] = true;
   return data.id;
 }
 
-// ── HELPERS ───────────────────────────────────────────────
-function getColor(empName) {
-  const id = clkNameToId[empName];
-  return (id && clkEmployees[id]?.color) || DEFAULT_COLORS[empName] || '#888';
+// ── BRIDGE ────────────────────────────────────────────────
+function bridgeToV3() {
+  COLORS = {};
+  activeStatus = {};
+  Object.values(clkEmployees).forEach(e => {
+    COLORS[e.name] = e.color || DEFAULT_COLORS[e.name] || '#888';
+    activeStatus[e.name] = e.is_active !== false;
+  });
 }
 
-function isActive(empName) {
-  const id = clkNameToId[empName];
-  return id ? (clkEmployees[id]?.is_active !== false) : true;
+// ── HELPERS ───────────────────────────────────────────────
+function getAllEmployees() {
+  const fromRaw = [...new Set(RAW.map(r => r.employee))];
+  const fromDB = Object.values(clkEmployees).map(e => e.name);
+  return [...new Set([...fromDB, ...fromRaw])].sort();
+}
+
+function getNextColor() {
+  const used = new Set(Object.values(COLORS));
+  return COLOR_PALETTE.find(c => !used.has(c)) || COLOR_PALETTE[Object.keys(COLORS).length % COLOR_PALETTE.length];
 }
 
 // ── PARAMS ────────────────────────────────────────────────
 function getParams() {
-  const entryStr = document.getElementById('clk_entry')?.value || '07:00';
+  const entryStr = document.getElementById('p_entry')?.value || '07:00';
   const [eh, em] = entryStr.split(':').map(Number);
   const entryMin = (eh||7)*60 + (em||0);
-  const tol = parseInt(document.getElementById('clk_tol')?.value)||15;
-  const minHrs = parseFloat(document.getElementById('clk_minhrs')?.value)||8;
+  const tol = parseInt(document.getElementById('p_tol')?.value)||15;
+  const minHrs = parseFloat(document.getElementById('p_minhrs')?.value)||8;
   return { entryMin, tol, minHrs, lateMin: entryMin+tol, vLateMin: entryMin+60 };
 }
 
@@ -159,7 +166,6 @@ function parseMin(t) {
   if (per==='AM'&&h===12) h=0;
   return h*60+mn;
 }
-
 function minToStr(m) {
   if (m===null||m===undefined) return '—';
   const rounded = Math.round(m);
@@ -200,7 +206,7 @@ function mergeDay(recs) {
 function buildClean() {
   CLEAN = {};
   const grouped = {};
-  for (const r of clkRecords) {
+  for (const r of RAW) {
     if (!grouped[r.employee]) grouped[r.employee] = {};
     if (!grouped[r.employee][r.date]) grouped[r.employee][r.date] = [];
     grouped[r.employee][r.date].push(r);
@@ -215,20 +221,20 @@ function buildClean() {
 
 // ── FILTER ────────────────────────────────────────────────
 function getMonths() {
-  const s = new Set(clkRecords.map(r=>r.date.slice(0,7)));
+  const s = new Set(RAW.map(r=>r.date.slice(0,7)));
   return [...s].sort();
 }
 
 function filterRecords(emp) {
   const days = Object.values(CLEAN[emp]||{});
-  if (clkSelectedMonth==='ytd') {
+  if (selectedMonth==='ytd') {
     const now = new Date();
     const cutoff = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
     return days.filter(r => r.date.slice(0,7) <= cutoff && r.date.startsWith(String(now.getFullYear())));
   }
-  if (clkSelectedMonth==='all') return days;
-  if (/^\d{4}$/.test(clkSelectedMonth)) return days.filter(r => r.date.startsWith(clkSelectedMonth));
-  return days.filter(r => r.date.startsWith(clkSelectedMonth));
+  if (selectedMonth==='all') return days;
+  if (/^\d{4}$/.test(selectedMonth)) return days.filter(r => r.date.startsWith(selectedMonth));
+  return days.filter(r => r.date.startsWith(selectedMonth));
 }
 
 // ── STATS ─────────────────────────────────────────────────
@@ -262,212 +268,280 @@ function dayStatus(r) {
   return 'vlate';
 }
 
-// ── INIT ──────────────────────────────────────────────────
-async function clockInit() {
-  try {
-    await loadFromSupabase();
-  } catch (err) {
-    console.warn('Clock: Supabase load failed, falling back to local data', err);
-    // Fallback to global RAW from clock-data.js if tables don't exist yet
-    if (typeof RAW !== 'undefined' && RAW.length) {
-      clkRecords = RAW.map(r => ({
-        employee: r.employee,
-        date: r.date,
-        day: r.day,
-        time_in: r.time_in || '',
-        time_out: r.time_out || '',
-        work_hours: r.work_hours || 0,
-        missing_out: r.missing_out || false,
-      }));
-      // Build employee map from RAW
-      const names = [...new Set(RAW.map(r=>r.employee))].sort();
-      names.forEach((name, i) => {
-        const fakeId = `local_${i}`;
-        clkEmployees[fakeId] = { name, color: DEFAULT_COLORS[name] || PALETTE[i % PALETTE.length], is_active: !['Frank Rojas','Maria Jose Romo'].includes(name) };
-        clkNameToId[name] = fakeId;
-      });
-    }
-  }
-
-  buildClean();
-  clkRenderMonthFilters();
-  clkRenderAll();
-}
-
 // ── MONTH FILTERS ─────────────────────────────────────────
 function getAvailableYears() {
   return [...new Set(getMonths().map(m => m.slice(0,4)))].sort().reverse();
 }
 
-function clkRenderMonthFilters() {
-  const container = document.getElementById('clkMonthFilters');
+function renderMonthFilters() {
+  const container = document.getElementById('monthFilters');
   if (!container) return;
   const years = getAvailableYears();
-
   let activeYear = null;
-  if (clkSelectedMonth !== 'ytd' && clkSelectedMonth !== 'all') {
-    activeYear = clkSelectedMonth.slice(0,4);
-  } else if (clkSelectedMonth === 'ytd') {
+  if (selectedMonth !== 'ytd' && selectedMonth !== 'all') {
+    activeYear = selectedMonth.slice(0,4);
+  } else if (selectedMonth === 'ytd') {
     activeYear = 'ytd';
   }
 
-  let row1 = `<button class="cf-btn ${clkSelectedMonth==='all'?'active':''}" onclick="window._clkSelectYear('all')">All</button>`;
-  row1 += `<button class="cf-btn ${activeYear==='ytd'?'active':''}" onclick="window._clkSelectYear('ytd')">YTD</button>`;
+  let row1 = `<button class="mf-btn ${selectedMonth==='all'?'active':''}" onclick="selectYear('all')">All</button>`;
+  row1 += `<button class="mf-btn ${activeYear==='ytd'?'active':''}" onclick="selectYear('ytd')">YTD</button>`;
   years.forEach(y => {
-    const isActive = activeYear === y && clkSelectedMonth !== 'ytd';
-    row1 += `<button class="cf-btn ${isActive?'active':''}" onclick="window._clkSelectYear('${y}')">${y}</button>`;
+    const isActive = activeYear === y && selectedMonth !== 'ytd';
+    row1 += `<button class="mf-btn ${isActive?'active':''}" onclick="selectYear('${y}')">${y}</button>`;
   });
 
   let row2 = '';
-  if (activeYear && activeYear !== 'ytd' && clkSelectedMonth !== 'all') {
+  if (activeYear && activeYear !== 'ytd' && selectedMonth !== 'all') {
     const yearMonths = getMonths().filter(m => m.startsWith(activeYear));
     const SHORT = {'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
-    const allYearActive = clkSelectedMonth === activeYear;
-    row2 += `<button class="cf-btn ${allYearActive?'active':''}" onclick="window._clkSelectMonth('${activeYear}')">All</button>`;
+    const allYearActive = selectedMonth === activeYear;
+    row2 += `<button class="mf-btn ${allYearActive?'active':''}" style="opacity:.7" onclick="selectMonth('${activeYear}')">All</button>`;
     yearMonths.forEach(m => {
       const mo = m.slice(5,7);
-      row2 += `<button class="cf-btn ${clkSelectedMonth===m?'active':''}" onclick="window._clkSelectMonth('${m}')">${SHORT[mo]}</button>`;
+      row2 += `<button class="mf-btn ${selectedMonth===m?'active':''}" onclick="selectMonth('${m}')">${SHORT[mo]}</button>`;
     });
   }
 
   container.innerHTML = `
     <div style="display:flex;gap:2px;align-items:center;">${row1}</div>
-    ${row2 ? `<div class="cf-divider"></div><div style="display:flex;gap:2px;align-items:center;">${row2}</div>` : ''}
+    ${row2 ? `<div class="mf-divider-v"></div><div style="display:flex;gap:2px;align-items:center;">${row2}</div>` : ''}
   `;
 }
 
-function clkSelectYear(y) {
-  if (y === 'all') {
-    clkSelectedMonth = clkSelectedMonth === 'all' ? 'ytd' : 'all';
-  } else if (y === 'ytd') {
-    clkSelectedMonth = 'ytd';
-  } else {
-    // If clicking the same year that's already active, collapse back to YTD
-    const currentYear = clkSelectedMonth.slice(0,4);
-    clkSelectedMonth = (currentYear === y) ? 'ytd' : y;
-  }
-  clkRenderMonthFilters();
-  clkRenderAll();
+function selectYear(y) {
+  selectedMonth = (y === 'all') ? 'all' : (y === 'ytd') ? 'ytd' : y;
+  renderMonthFilters();
+  renderAll();
 }
 
-function clkSelectMonth(m) {
-  clkSelectedMonth = m;
-  clkRenderMonthFilters();
-  clkRenderAll();
+function selectMonth(m) {
+  selectedMonth = m;
+  renderMonthFilters();
+  renderAll();
 }
 
 // ── RENDER ALL ────────────────────────────────────────────
-function clkRenderAll() {
-  clkRenderTable();
-  clkRenderHoursTable();
-  if (clkSelectedEmp) clkRenderDetail(clkSelectedEmp);
+function renderAll() {
+  renderTable();
+  if (selectedEmp) renderDetail(selectedEmp);
 }
 
-// ── EMPLOYEE TABLE ────────────────────────────────────────
-function clkRenderTable() {
-  const all = [...new Set(clkRecords.map(r=>r.employee))].sort();
-  const active = all.filter(e=>isActive(e));
-  const inactive = all.filter(e=>!isActive(e));
-  const body = document.getElementById('clkTableBody');
-  if (!body) return;
-  let html = '';
+// ── TAB SWITCHING ──────────────────────────────────────────
+function switchTab(tab) {
+  activeTab = tab;
+  document.getElementById('section-clock').classList.toggle('active', tab === 'clock');
+  document.getElementById('section-calendar').classList.toggle('active', tab === 'calendar');
+  document.getElementById('tab-clock').classList.toggle('active', tab === 'clock');
+  document.getElementById('tab-calendar').classList.toggle('active', tab === 'calendar');
+  const filterBar = document.getElementById('clkFilterBar');
+  if (filterBar) filterBar.style.display = tab === 'clock' ? '' : 'none';
+  if (tab === 'calendar') renderBdayAll();
+}
 
-  active.forEach(e => {
+// ── EMPLOYEE TABLE ─────────────────────────────────────────
+const mpill = (v, cls) => v ? `<span class="pill ${cls}">${v}</span>` : '<span style="color:var(--tx3);font-size:11px;">0</span>';
+
+const METRIC_DEFS = {
+  all: {
+    cols: '1fr 90px 80px 100px 80px 80px 90px',
+    headers: ['Employee', 'Attendance', 'On Time', 'Avg Arrival', 'Avg Hours', 'Absences', 'Missing OUT'],
+    row: (e, s) => `
+      <div class="emp-name">${e}</div>
+      <div class="cell">${s ? s.attPct.toFixed(0)+'%' : '—'}</div>
+      <div class="cell">${s && s.arrivals>0 ? s.ontimePct.toFixed(0)+'%' : '—'}</div>
+      <div class="cell mono">${s ? minToStr(s.avgArr) : '—'}</div>
+      <div class="cell">${s && s.avgHrs>0 ? s.avgHrs.toFixed(1)+'h' : '—'}</div>
+      <div class="cell">${s ? mpill(s.absent>0?s.absent+'d':null,'pill-grey') : '—'}</div>
+      <div class="cell">${s ? mpill(s.mout>0?s.mout:null,'pill-purple') : '—'}</div>`
+  },
+  attendance: {
+    cols: '1fr 140px',
+    headers: ['Employee', 'Attendance'],
+    row: (e, s) => `
+      <div class="emp-name">${e}</div>
+      <div class="cell" style="font-size:15px;font-weight:600;color:var(--tx)">${s ? s.attPct.toFixed(0)+'%' : '—'}</div>`
+  },
+  arrival: {
+    cols: '1fr 140px',
+    headers: ['Employee', 'Avg Arrival'],
+    row: (e, s) => `
+      <div class="emp-name">${e}</div>
+      <div class="cell mono" style="font-size:15px;font-weight:600;color:var(--tx)">${s ? minToStr(s.avgArr) : '—'}</div>`
+  },
+  missing: {
+    cols: '1fr 120px 120px',
+    headers: ['Employee', 'Absences', 'Missing OUT'],
+    row: (e, s) => `
+      <div class="emp-name">${e}</div>
+      <div class="cell">${s ? mpill(s.absent>0?s.absent+'d':null,'pill-grey') : '—'}</div>
+      <div class="cell">${s ? mpill(s.mout>0?s.mout:null,'pill-purple') : '—'}</div>`
+  }
+};
+
+function setMetric(metric, el) {
+  activeMetric = metric;
+  document.querySelectorAll('.metric-tab').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  renderTable();
+}
+
+function renderTable() {
+  const all = getAllEmployees();
+  const active = all.filter(e=>activeStatus[e]);
+  const inactive = all.filter(e=>!activeStatus[e]);
+  const body = document.getElementById('empTableBody');
+  const header = document.getElementById('empTableHeader');
+  const def = METRIC_DEFS[activeMetric];
+
+  if (header) {
+    header.style.gridTemplateColumns = def.cols;
+    header.innerHTML = def.headers.map(h=>`<div class="th">${h}</div>`).join('');
+  }
+
+  let html = '';
+  active.forEach(e=>{
     const days = filterRecords(e);
     const s = days.length ? calcStats(days) : null;
-    const col = getColor(e);
-    const isSelected = clkSelectedEmp===e;
-    html += `<div class="clock-emp-wrap" id="clkWrap_${e.replace(/ /g,'_')}">
-      <div class="clock-emp-row ${isSelected?'selected':''}" onclick="window._clkToggleDetail('${e}')">
-        <div class="clock-emp-name"><div class="clock-emp-dot" style="background:${col}"></div>${e}</div>
-        <div class="clock-cell">${s ? s.attPct.toFixed(0)+'%' : '<span style="color:var(--t3)">—</span>'}</div>
-        <div class="clock-cell">${s && s.arrivals>0 ? s.ontimePct.toFixed(0)+'%' : '—'}</div>
-        <div class="clock-cell">${s ? minToStr(s.avgArr) : '—'}</div>
-        <div class="clock-cell">${s && s.avgHrs>0 ? s.avgHrs.toFixed(1)+'h' : '—'}</div>
-        <div>${s && s.absent>0 ? `<span class="clock-pill clock-pill-grey">${s.absent}d</span>` : (s?'<span style="color:var(--t3);font-size:11px;">0</span>':'—')}</div>
-        <div>${s && s.mout>0 ? `<span class="clock-pill clock-pill-purple">${s.mout}</span>` : (s?'<span style="color:var(--t3);font-size:11px;">0</span>':'—')}</div>
+    const isSelected = selectedEmp===e;
+    html += `<div class="emp-row-wrap" id="wrap_${e.replace(/ /g,'_')}">
+      <div class="emp-row ${isSelected?'selected':''}" style="grid-template-columns:${def.cols}" onclick="toggleDetail('${e}')">
+        ${def.row(e, s)}
       </div>
-      <div class="clock-detail ${isSelected?'open':''}" id="clkDetail_${e.replace(/ /g,'_')}"></div>
+      <div class="detail-panel ${isSelected?'open':''}" id="detail_${e.replace(/ /g,'_')}"></div>
     </div>`;
   });
 
-  if (inactive.length > 0 && clkShowInactive) {
-    inactive.forEach(e => {
-      const days = filterRecords(e);
-      const s = days.length ? calcStats(days) : null;
-      const col = getColor(e);
-      html += `<div class="clock-emp-wrap" id="clkWrap_${e.replace(/ /g,'_')}" style="opacity:.45;">
-        <div class="clock-emp-row clock-emp-inactive" onclick="window._clkToggleDetail('${e}')">
-          <div class="clock-emp-name"><div class="clock-emp-dot" style="background:${col}"></div>${e} <span style="font-size:10px;color:var(--t3);font-weight:400;">inactive</span></div>
-          <div class="clock-cell">${s ? s.attPct.toFixed(0)+'%' : '—'}</div>
-          <div class="clock-cell">${s && s.arrivals>0 ? s.ontimePct.toFixed(0)+'%' : '—'}</div>
-          <div class="clock-cell">${s ? minToStr(s.avgArr) : '—'}</div>
-          <div class="clock-cell">${s && s.avgHrs>0 ? s.avgHrs.toFixed(1)+'h' : '—'}</div>
-          <div>${s && s.absent>0 ? `<span class="clock-pill clock-pill-grey">${s.absent}d</span>` : (s?'<span style="color:var(--t3);font-size:11px;">0</span>':'—')}</div>
-          <div>${s && s.mout>0 ? `<span class="clock-pill clock-pill-purple">${s.mout}</span>` : (s?'<span style="color:var(--t3);font-size:11px;">0</span>':'—')}</div>
-        </div>
-        <div class="clock-detail ${clkSelectedEmp===e?'open':''}" id="clkDetail_${e.replace(/ /g,'_')}"></div>
-      </div>`;
-    });
-  }
+  if (body) body.innerHTML = html || '<div class="empty">No data for this period.</div>';
 
-  body.innerHTML = html || '<div class="clock-empty">No data for this period.</div>';
-
-  // Toggle row
-  const toggleRow = document.getElementById('clkToggleRow');
+  const toggleRow = document.getElementById('toggleRow');
   if (toggleRow) {
     if (inactive.length > 0) {
       toggleRow.style.display = 'flex';
-      document.getElementById('clkToggleRowBtn').textContent = clkShowInactive
-        ? `Hide inactive (${inactive.length})`
-        : `Show inactive (${inactive.length})`;
+      const btn = document.getElementById('toggleRowBtn');
+      if (btn) btn.textContent = `${inactive.length} inactive employee${inactive.length>1?'s':''}`;
     } else {
       toggleRow.style.display = 'none';
     }
   }
 
-  // Per-employee toggle buttons
-  const toggleGroup = document.getElementById('clkToggleGroup');
-  if (toggleGroup) {
-    toggleGroup.innerHTML = all.map(e=>`
-      <button class="clock-emp-toggle ${!isActive(e)?'inactive-t':''}" onclick="window._clkToggleEmp('${e}')">
-        <div class="ct-dot" style="background:${getColor(e)}"></div>${e.split(' ')[0]}
-      </button>`).join('');
-  }
-
-  if (clkSelectedEmp) clkRenderDetail(clkSelectedEmp);
+  if (selectedEmp) renderDetail(selectedEmp);
 }
 
-async function clkToggleEmp(name) {
+function openInactiveModal() {
+  const all = getAllEmployees();
+  const inactive = all.filter(e=>!activeStatus[e]);
+  const body = document.getElementById('inactiveModalBody');
+  if (!body) return;
+  if (!inactive.length) {
+    body.innerHTML = '<div style="padding:24px;text-align:center;font-size:12px;color:var(--tx3)">No inactive employees.</div>';
+  } else {
+    body.innerHTML = inactive.map(e => {
+      const days = filterRecords(e);
+      const s = days.length ? calcStats(days) : null;
+      const col = COLORS[e]||'#888';
+      return `<div class="manage-emp-item">
+        <div style="background:${col};width:8px;height:8px;border-radius:50%;flex-shrink:0"></div>
+        <div style="flex:1">
+          <div class="manage-emp-name">${e}</div>
+          <div class="manage-emp-status">${s ? `Att. ${s.attPct.toFixed(0)}% · ${s.absent}d absent` : 'No data'}</div>
+        </div>
+        <button class="manage-emp-toggle" onclick="toggleEmp('${e}');renderInactiveModal()">Set Active</button>
+      </div>`;
+    }).join('');
+  }
+  document.getElementById('inactiveModal').classList.add('open');
+}
+
+function renderInactiveModal() { openInactiveModal(); }
+
+async function addManualEmployee() {
+  const inp = document.getElementById('newEmpName');
+  const name = inp.value.trim();
+  if (!name) return;
+  if (getAllEmployees().includes(name)) { notify('Employee already exists'); return; }
+  const color = getNextColor();
+  try {
+    await ensureEmployee(name, color);
+    inp.value = '';
+    renderManageModal();
+    renderAll();
+    notify(`${name} added`);
+  } catch (err) {
+    console.error(err);
+    notify('Error adding employee');
+  }
+}
+
+async function removeManualEmployee(name) {
+  const hasRecords = RAW.some(r => r.employee === name);
+  if (hasRecords) {
+    notify('Has records — use Active/Inactive toggle instead');
+    return;
+  }
+  if (!confirm(`Remove ${name}?`)) return;
   const id = clkNameToId[name];
-  if (!id) return;
-  const newActive = !isActive(name);
-  clkEmployees[id].is_active = newActive;
-  if (!newActive && clkSelectedEmp===name) clkSelectedEmp=null;
-
-  // Persist to Supabase (non-blocking for local IDs from fallback)
-  if (!id.startsWith('local_')) {
-    supabase.from('clock_employees').update({ is_active: newActive }).eq('id', id).then();
+  if (id) {
+    const { error } = await supabase.from('clock_employees').delete().eq('id', id);
+    if (error) { notify('Error removing employee'); return; }
+    delete clkEmployees[id];
+    delete clkNameToId[name];
   }
-
-  clkRenderAll();
-  clkNotify(`${name.split(' ')[0]} ${newActive?'active':'hidden'}`);
+  delete activeStatus[name];
+  delete COLORS[name];
+  renderManageModal();
+  renderAll();
+  notify(`${name} removed`);
 }
 
-function clkToggleShowInactive() {
-  clkShowInactive = !clkShowInactive;
-  clkRenderTable();
+function openManageModal() {
+  renderManageModal();
+  document.getElementById('manageModal').classList.add('open');
+}
+
+function renderManageModal() {
+  const all = getAllEmployees();
+  const fromCsv = new Set(RAW.map(r => r.employee));
+  const body = document.getElementById('manageModalBody');
+  if (!body) return;
+  body.innerHTML = all.map(e => {
+    const isActive = !!activeStatus[e];
+    const isManualOnly = !fromCsv.has(e);
+    return `<div class="manage-emp-item">
+      <div style="flex:1">
+        <div class="manage-emp-name">${e}</div>
+        <div class="manage-emp-status">${isActive ? 'Active' : 'Inactive'}${isManualOnly ? ' · manually added' : ''}</div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="manage-emp-toggle ${isActive?'is-active':''}" onclick="toggleEmp('${e}');renderManageModal()">${isActive ? 'Active' : 'Set Active'}</button>
+        ${isManualOnly ? `<button class="manage-emp-toggle" style="color:var(--red);border-color:var(--red)" onclick="removeManualEmployee('${e}')">Remove</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function toggleEmp(name) {
+  activeStatus[name] = !activeStatus[name];
+  if (!activeStatus[name] && selectedEmp===name) selectedEmp=null;
+  const id = clkNameToId[name];
+  if (id) {
+    supabase.from('clock_employees').update({ is_active: activeStatus[name] }).eq('id', id).then(({ error }) => {
+      if (error) console.error('Failed to update active status:', error);
+      else if (clkEmployees[id]) clkEmployees[id].is_active = activeStatus[name];
+    });
+  }
+  renderAll();
 }
 
 // ── DETAIL PANEL ──────────────────────────────────────────
-function clkToggleDetail(emp) {
-  if (clkSelectedEmp===emp) { clkSelectedEmp = null; clkRenderTable(); return; }
-  clkSelectedEmp = emp;
-  clkRenderTable();
+function toggleDetail(emp) {
+  if (selectedEmp===emp) { selectedEmp = null; renderTable(); return; }
+  selectedEmp = emp;
+  renderTable();
 }
 
-function clkRenderDetail(emp) {
-  const id = `clkDetail_${emp.replace(/ /g,'_')}`;
+function renderDetail(emp) {
+  const id = `detail_${emp.replace(/ /g,'_')}`;
   const panel = document.getElementById(id);
   if (!panel) return;
   const rawDays = filterRecords(emp);
@@ -490,13 +564,13 @@ function clkRenderDetail(emp) {
   const rows = days.map(r=>{
     const st = dayStatus(r);
     const pill = {
-      ontime:`<span class="clock-pill clock-pill-good">On time</span>`,
-      late:`<span class="clock-pill clock-pill-warn">Late</span>`,
-      vlate:`<span class="clock-pill clock-pill-bad">Very late</span>`,
-      absent:`<span class="clock-pill clock-pill-grey">Absent</span>`,
-      mout:`<span class="clock-pill clock-pill-purple">Missing OUT</span>`,
-      holiday:`<span class="clock-pill" style="background:var(--slatel);color:var(--slate);">${HOLIDAY_NAMES[r.date]||'NYSE Holiday'}</span>`,
-      present:`<span class="clock-pill clock-pill-good">Present</span>`,
+      ontime:`<span class="pill pill-good">On time</span>`,
+      late:`<span class="pill pill-warn">Late</span>`,
+      vlate:`<span class="pill pill-bad">Very late</span>`,
+      absent:`<span class="pill pill-grey">Absent</span>`,
+      mout:`<span class="pill pill-purple">Missing OUT</span>`,
+      holiday:`<span class="pill" style="background:var(--slatel);color:var(--slate);">${HOLIDAY_NAMES[r.date]||'NYSE Holiday'}</span>`,
+      present:`<span class="pill pill-good">Present</span>`,
     }[st]||'';
     const tiStr = r.time_in || '—';
     const toStr = r.time_out || '—';
@@ -506,302 +580,180 @@ function clkRenderDetail(emp) {
       const diff = r.time_in_min - p.entryMin;
       lateBy = `<span style="color:${diff>60?'var(--red)':'var(--amber)'};font-size:10px;">+${diff}min</span>`;
     }
-    return `<tr>
-      <td>${r.date}</td>
-      <td style="color:var(--t3);font-size:10px;">${r.day}</td>
-      <td>${tiStr} ${lateBy}</td>
-      <td>${toStr}</td>
-      <td>${hrsStr}</td>
+    const editable = !r._isHoliday;
+    return `<tr ${editable?`onclick="openRecordEdit('${emp}','${r.date}')" title="Click to edit"`:'style="cursor:default"'}>
+      <td class="mono">${r.date}</td>
+      <td style="color:var(--tx3);font-size:10px;">${r.day}</td>
+      <td class="mono">${tiStr} ${lateBy}</td>
+      <td class="mono">${toStr}</td>
+      <td class="mono">${hrsStr}</td>
       <td>${pill}</td>
     </tr>`;
   }).join('');
 
   const s = calcStats(days);
   panel.innerHTML = `
-    <div class="clock-detail-header">
+    <div class="detail-header">
       <div style="display:flex;align-items:center;gap:8px;">
-        <div style="width:8px;height:8px;border-radius:50%;background:${getColor(emp)};"></div>
-        <span class="clock-detail-name">${emp}</span>
-        <span style="font-size:10px;color:var(--t3);">${s.present} days present · ${s.absent} absent · ${s.mout} missing OUT · avg ${minToStr(s.avgArr)} · ${s.avgHrs.toFixed(1)}h/day</span>
+        <span class="detail-name">${emp}</span>
+        <span style="font-size:10px;color:var(--tx3);">${s.present} days present · ${s.absent} absent · ${s.mout} missing OUT · avg ${minToStr(s.avgArr)} · ${s.avgHrs.toFixed(1)}h/day</span>
       </div>
-      <button class="clock-detail-close" onclick="window._clkToggleDetail('${emp}')">Close</button>
+      <button class="detail-close" onclick="toggleDetail('${emp}')">Close</button>
     </div>
-    <div class="clock-legend">
-      <div class="clock-leg-item"><div class="clock-leg-dot" style="background:var(--greenl);border:1px solid var(--green);"></div>On time</div>
-      <div class="clock-leg-item"><div class="clock-leg-dot" style="background:var(--amberl);border:1px solid var(--amber);"></div>Late (&lt;1h)</div>
-      <div class="clock-leg-item"><div class="clock-leg-dot" style="background:var(--redl);border:1px solid var(--red);"></div>Very late (&gt;1h)</div>
-      <div class="clock-leg-item"><div class="clock-leg-dot" style="background:var(--slatel);border:1px solid var(--slate);"></div>Absent</div>
-      <div class="clock-leg-item"><div class="clock-leg-dot" style="background:var(--indigol);border:1px solid var(--indigo);"></div>Missing OUT</div>
+    <div class="legend">
+      <div class="leg-item"><div class="leg-dot" style="background:var(--ontime-bg);border:1px solid var(--ontime);"></div>On time</div>
+      <div class="leg-item"><div class="leg-dot" style="background:var(--late-bg);border:1px solid var(--late);"></div>Late (&lt;1h)</div>
+      <div class="leg-item"><div class="leg-dot" style="background:var(--vlate-bg);border:1px solid var(--vlate);"></div>Very late (&gt;1h)</div>
+      <div class="leg-item"><div class="leg-dot" style="background:var(--absent-bg);border:1px solid #9ca3af;"></div>Absent</div>
+      <div class="leg-item"><div class="leg-dot" style="background:var(--mout-bg);border:1px solid var(--mout);"></div>Missing OUT</div>
     </div>
-    <table class="clock-log">
+    <table class="log-table">
       <thead><tr><th>Date</th><th>Day</th><th>IN</th><th>OUT</th><th>Hours</th><th>Status</th></tr></thead>
-      <tbody>${rows||'<tr><td colspan="6" style="text-align:center;color:var(--t3);padding:20px;">No records for this period.</td></tr>'}</tbody>
+      <tbody>${rows||'<tr><td colspan="6" style="text-align:center;color:var(--tx3);padding:20px;">No records for this period.</td></tr>'}</tbody>
     </table>`;
 }
 
-// ── HOURS TABLE (revenue-style) ─────────────────────────────
-const CLK_MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-let clkYearsOpen = new Set();
-let clkMetric = 'hours'; // 'hours', 'attendance', 'ontime'
-let clkTableShowInactive = false;
+// ── RECORD EDITING ─────────────────────────────────────────
+let editingEmp = null, editingDate = null;
 
-function clkGetYears() {
-  const s = new Set(clkRecords.map(r => parseInt(r.date.slice(0,4))));
-  return [...s].sort();
+function openRecordEdit(emp, date) {
+  editingEmp = emp;
+  editingDate = date;
+  const rec = RAW.find(r => r.employee === emp && r.date === date);
+  document.getElementById('editRecTitle').textContent = emp;
+  document.getElementById('editRecSub').textContent = date;
+  document.getElementById('editRecIn').value  = rec ? (rec.time_in  || '') : '';
+  document.getElementById('editRecOut').value = rec ? (rec.time_out || '') : '';
+  document.getElementById('editRecModal').classList.add('open');
 }
 
-function clkToggleYear(y) {
-  if (clkYearsOpen.has(y)) clkYearsOpen.delete(y);
-  else clkYearsOpen.add(y);
-  clkRenderHoursTable();
-}
+async function saveRecordEdit() {
+  const timeIn  = document.getElementById('editRecIn').value.trim();
+  const timeOut = document.getElementById('editRecOut').value.trim();
+  const rec = RAW.find(r => r.employee === editingEmp && r.date === editingDate);
+  if (rec) {
+    rec.time_in  = timeIn;
+    rec.time_out = timeOut;
+    if (timeIn && timeOut) {
+      const toMin = t => {
+        const m = t.match(/(\d+):(\d+)\s*(AM|PM)?/i);
+        if (!m) return null;
+        let h = parseInt(m[1]), mn = parseInt(m[2]);
+        const ampm = (m[3]||'').toUpperCase();
+        if (ampm === 'PM' && h !== 12) h += 12;
+        if (ampm === 'AM' && h === 12) h = 0;
+        return h * 60 + mn;
+      };
+      const inM = toMin(timeIn), outM = toMin(timeOut);
+      if (inM !== null && outM !== null && outM > inM) rec.work_hours = (outM - inM) / 60;
+    }
+    rec.missing_out = !!(timeIn && !timeOut);
 
-function clkExpandAllYears() {
-  clkGetYears().forEach(y => clkYearsOpen.add(y));
-  clkRenderHoursTable();
-}
-
-function clkCollapseAllYears() {
-  clkYearsOpen.clear();
-  clkRenderHoursTable();
-}
-
-function clkSetMetric(m) {
-  clkMetric = m;
-  clkRenderHoursTable();
-  document.querySelectorAll('#clkMetricToggle .toggle-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.metric === m);
-  });
-}
-
-function clkToggleTableInactive() {
-  clkTableShowInactive = !clkTableShowInactive;
-  const btn = document.getElementById('clkTableInactiveBtn');
-  if (btn) btn.textContent = clkTableShowInactive ? 'Hide inactive' : 'Show inactive';
-  clkRenderHoursTable();
-}
-
-function clkEmpIsVisibleInTable(emp) {
-  if (clkTableShowInactive) return true;
-  return isActive(emp);
-}
-
-// Compute per-employee, per-month stats from CLEAN data
-function clkEmpMonthStats(emp, year, month) {
-  const prefix = `${year}-${String(month).padStart(2,'0')}`;
-  const days = Object.values(CLEAN[emp] || {}).filter(r => r.date.startsWith(prefix));
-  const workdays = days.filter(r => !HOLIDAYS.has(r.date) && !r._isHoliday);
-  const total = workdays.length;
-  const present = workdays.filter(r => r.time_in !== '').length;
-  const hours = workdays.reduce((s, r) => s + r.work_hours, 0);
-  const p = getParams();
-  const arrivals = workdays.filter(r => r.time_in_min !== null && r.time_in_min < 720);
-  const ontime = arrivals.filter(r => r.time_in_min <= p.lateMin).length;
-  return { total, present, hours, arrivals: arrivals.length, ontime };
-}
-
-function clkEmpYearStats(emp, year) {
-  let total = 0, present = 0, hours = 0, arrivals = 0, ontime = 0;
-  for (let m = 1; m <= 12; m++) {
-    const s = clkEmpMonthStats(emp, year, m);
-    total += s.total; present += s.present; hours += s.hours;
-    arrivals += s.arrivals; ontime += s.ontime;
+    const empId = clkNameToId[editingEmp];
+    if (empId) {
+      supabase.from('clock_records').update({
+        time_in: timeIn,
+        time_out: timeOut,
+        work_hours: rec.work_hours,
+        missing_out: rec.missing_out,
+      }).eq('employee_id', empId).eq('date', editingDate).then(({ error }) => {
+        if (error) console.error('Failed to save record edit:', error);
+      });
+    }
   }
-  return { total, present, hours, arrivals, ontime };
+  document.getElementById('editRecModal').classList.remove('open');
+  buildClean();
+  renderAll();
+  if (editingEmp) renderDetail(editingEmp);
+  notify('Record updated');
 }
 
-function clkEmpGrandStats(emp) {
-  let total = 0, present = 0, hours = 0, arrivals = 0, ontime = 0;
-  clkGetYears().forEach(y => {
-    const s = clkEmpYearStats(emp, y);
-    total += s.total; present += s.present; hours += s.hours;
-    arrivals += s.arrivals; ontime += s.ontime;
-  });
-  return { total, present, hours, arrivals, ontime };
+// ── FILE HISTORY ───────────────────────────────────────────
+const HIST_KEY = 'summit_csv_history';
+const HIST_MAX = 20;
+
+function loadCSVHistory() {
+  try { return JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); }
+  catch { return []; }
 }
 
-function clkFmtMetric(stats) {
-  if (clkMetric === 'hours') {
-    return stats.hours > 0 ? stats.hours.toFixed(0) : '';
-  }
-  if (clkMetric === 'attendance') {
-    if (stats.total === 0) return '';
-    return (stats.present / stats.total * 100).toFixed(0) + '%';
-  }
-  if (clkMetric === 'ontime') {
-    if (stats.arrivals === 0) return '';
-    return (stats.ontime / stats.arrivals * 100).toFixed(0) + '%';
-  }
-  return '';
+function saveCSVToHistory(filename, records, rawCSV) {
+  const history = loadCSVHistory();
+  const dates = records.map(r=>r.date).sort();
+  const employees = [...new Set(records.map(r=>r.employee))].sort();
+  const entry = {
+    id: Date.now(), filename,
+    uploadedAt: new Date().toISOString(),
+    recordsAdded: records.filter(r=>r.isNew).length,
+    totalRecords: records.length,
+    employees,
+    dateFrom: dates[0] || '',
+    dateTo: dates[dates.length-1] || '',
+    rawCSV,
+  };
+  history.unshift(entry);
+  if (history.length > HIST_MAX) history.length = HIST_MAX;
+  localStorage.setItem(HIST_KEY, JSON.stringify(history));
 }
 
-function clkFmtTotal(stats) {
-  if (clkMetric === 'hours') {
-    return stats.hours > 0 ? stats.hours.toFixed(0) : '';
-  }
-  if (clkMetric === 'attendance') {
-    if (stats.total === 0) return '';
-    return (stats.present / stats.total * 100).toFixed(0) + '%';
-  }
-  if (clkMetric === 'ontime') {
-    if (stats.arrivals === 0) return '';
-    return (stats.ontime / stats.arrivals * 100).toFixed(0) + '%';
-  }
-  return '';
+function openHistoryModal() {
+  renderHistoryModal();
+  document.getElementById('histModal').classList.add('open');
 }
 
-function clkRenderHoursTable() {
-  const YEARS = clkGetYears();
-  if (!YEARS.length) return;
-
-  // Default: open the latest year
-  if (clkYearsOpen.size === 0) clkYearsOpen.add(YEARS[YEARS.length - 1]);
-
-  const allEmps = [...new Set(clkRecords.map(r => r.employee))].sort();
-  const activeEmps = allEmps.filter(e => isActive(e));
-  const inactiveEmps = allEmps.filter(e => !isActive(e));
-
-  const anyOpen = YEARS.some(y => clkYearsOpen.has(y));
-  const rs = anyOpen ? ' rowspan="2"' : '';
-
-  // ── HEAD ──
-  let row1 = '<tr>';
-  row1 += `<th class="sticky-col" style="width:32px;"${rs}></th>`;
-  row1 += `<th class="sticky-col-2"${rs}>
-    <div style="display:flex;align-items:center;justify-content:space-between;">
-      <span>Employee</span>
-      <div class="toggle-group" id="clkMetricToggle" style="margin-left:8px;">
-        <button class="toggle-btn ${clkMetric==='hours'?'active':''}" data-metric="hours" onclick="event.stopPropagation();window._clkSetMetric('hours')" style="font-size:9px;padding:2px 6px;">Hours</button>
-        <button class="toggle-btn ${clkMetric==='attendance'?'active':''}" data-metric="attendance" onclick="event.stopPropagation();window._clkSetMetric('attendance')" style="font-size:9px;padding:2px 6px;">Attend %</button>
-        <button class="toggle-btn ${clkMetric==='ontime'?'active':''}" data-metric="ontime" onclick="event.stopPropagation();window._clkSetMetric('ontime')" style="font-size:9px;padding:2px 6px;">On Time %</button>
+function renderHistoryModal() {
+  const history = loadCSVHistory();
+  const body = document.getElementById('histModalBody');
+  if (!body) return;
+  if (!history.length) {
+    body.innerHTML = '<div class="hist-empty">No files uploaded yet. Import a CSV to get started.</div>';
+    return;
+  }
+  body.innerHTML = '<div class="hist-list">' + history.map(entry => {
+    const dt = new Date(entry.uploadedAt);
+    const dateStr = dt.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+    const timeStr = dt.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'});
+    const range = entry.dateFrom && entry.dateTo ? `${entry.dateFrom} → ${entry.dateTo}` : 'unknown range';
+    const empList = entry.employees.slice(0,3).join(', ') + (entry.employees.length > 3 ? ` +${entry.employees.length-3}` : '');
+    return `<div class="hist-item" onclick="viewHistoryFile(${entry.id})">
+      <div class="hist-icon" title="Download CSV">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M8 12L3 7h3V1h4v6h3L8 12zM2 13h12v2H2v-2z"/></svg>
       </div>
-    </div>
-  </th>`;
+      <div style="flex:1;min-width:0">
+        <div class="hist-name">${entry.filename}</div>
+        <div class="hist-meta">${dateStr} at ${timeStr} · ${range}</div>
+        <div class="hist-meta" style="margin-top:1px">${empList}</div>
+      </div>
+      <span class="hist-badge">+${entry.recordsAdded} records</span>
+      <button class="hist-del" title="Remove from history" onclick="deleteHistoryFile(event, ${entry.id})">✕</button>
+    </div>`;
+  }).join('') + '</div>';
+}
 
-  YEARS.forEach(y => {
-    const open = clkYearsOpen.has(y);
-    if (open) {
-      row1 += `<th class="year-th year-divider-left" colspan="13" onclick="window._clkToggleYear(${y})">
-        <span class="year-chev open">\u25B8</span>${y}
-      </th>`;
-    } else {
-      row1 += `<th class="year-th" onclick="window._clkToggleYear(${y})"${rs}>
-        <span class="year-chev">\u25B8</span>${y}
-      </th>`;
-    }
-  });
-  row1 += `<th class="grand-total-th num"${rs}>Total</th>`;
-  row1 += '</tr>';
+function viewHistoryFile(id) {
+  const entry = loadCSVHistory().find(e => e.id === id);
+  if (!entry || !entry.rawCSV) return;
+  const blob = new Blob([entry.rawCSV], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = entry.filename; a.click();
+  URL.revokeObjectURL(url);
+}
 
-  let row2 = '';
-  if (anyOpen) {
-    row2 = '<tr>';
-    YEARS.forEach(y => {
-      if (clkYearsOpen.has(y)) {
-        CLK_MONTH_NAMES.forEach((m, i) => {
-          const cls = i === 0 ? 'month-th num year-divider-left' : 'month-th num';
-          row2 += `<th class="${cls}">${m}</th>`;
-        });
-        row2 += `<th class="year-total-cell num">${y} Total</th>`;
-      }
-    });
-    row2 += '</tr>';
-  }
-
-  document.getElementById('clkHoursHead').innerHTML = row1 + row2;
-
-  // ── BODY ──
-  let html = '';
-
-  function renderEmpRow(emp) {
-    const col = getColor(emp);
-    const active = isActive(emp);
-    const rowCls = active ? 'acct-row subcat-row' : 'acct-row acct-inactive subcat-row';
-    const safeEmp = emp.replace(/'/g, "\\'");
-    const toggleBtn = `<button class="line-toggle-btn"
-      onclick="event.stopPropagation(); window._clkToggleEmp('${safeEmp}')"
-      title="${active ? 'Hide' : 'Show'}">${active ? 'hide' : 'show'}</button>`;
-
-    html += `<tr class="${rowCls}">`;
-    html += '<td class="sticky-col"></td>';
-    html += `<td class="sticky-col-2"><div class="subcat-inner"><span class="subcat-name"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${col};margin-right:8px;vertical-align:middle;"></span>${emp}</span><span class="subcat-actions">${toggleBtn}</span></div></td>`;
-
-    YEARS.forEach(y => {
-      if (clkYearsOpen.has(y)) {
-        for (let m = 1; m <= 12; m++) {
-          const s = clkEmpMonthStats(emp, y, m);
-          const val = clkFmtMetric(s);
-          html += `<td class="num">${val}</td>`;
-        }
-        const ys = clkEmpYearStats(emp, y);
-        html += `<td class="year-total-cell num" style="font-weight:600;">${clkFmtTotal(ys)}</td>`;
-      } else {
-        const ys = clkEmpYearStats(emp, y);
-        html += `<td class="num" style="font-weight:600;">${clkFmtTotal(ys)}</td>`;
-      }
-    });
-
-    const gs = clkEmpGrandStats(emp);
-    html += `<td class="grand-total-cell num display-num">${clkFmtTotal(gs)}</td>`;
-    html += '</tr>';
-  }
-
-  const visibleEmpsForTable = allEmps.filter(e => clkEmpIsVisibleInTable(e));
-  visibleEmpsForTable.forEach(e => renderEmpRow(e));
-
-  document.getElementById('clkHoursBody').innerHTML = html || '<tr><td colspan="99" class="clock-empty">No data.</td></tr>';
-
-  // ── FOOT (totals) ──
-  let footHtml = '<tr class="total-row">';
-  footHtml += '<td class="sticky-col"></td>';
-  footHtml += '<td class="sticky-col-2">Total</td>';
-
-  const visibleEmps = allEmps.filter(e => clkEmpIsVisibleInTable(e));
-
-  YEARS.forEach(y => {
-    if (clkYearsOpen.has(y)) {
-      for (let m = 1; m <= 12; m++) {
-        let agg = { total: 0, present: 0, hours: 0, arrivals: 0, ontime: 0 };
-        visibleEmps.forEach(e => {
-          const s = clkEmpMonthStats(e, y, m);
-          agg.total += s.total; agg.present += s.present; agg.hours += s.hours;
-          agg.arrivals += s.arrivals; agg.ontime += s.ontime;
-        });
-        footHtml += `<td class="num">${clkFmtTotal(agg)}</td>`;
-      }
-      let aggY = { total: 0, present: 0, hours: 0, arrivals: 0, ontime: 0 };
-      visibleEmps.forEach(e => {
-        const s = clkEmpYearStats(e, y);
-        aggY.total += s.total; aggY.present += s.present; aggY.hours += s.hours;
-        aggY.arrivals += s.arrivals; aggY.ontime += s.ontime;
-      });
-      footHtml += `<td class="year-total-cell num display-num">${clkFmtTotal(aggY)}</td>`;
-    } else {
-      let aggY = { total: 0, present: 0, hours: 0, arrivals: 0, ontime: 0 };
-      visibleEmps.forEach(e => {
-        const s = clkEmpYearStats(e, y);
-        aggY.total += s.total; aggY.present += s.present; aggY.hours += s.hours;
-        aggY.arrivals += s.arrivals; aggY.ontime += s.ontime;
-      });
-      footHtml += `<td class="num display-num">${clkFmtTotal(aggY)}</td>`;
-    }
-  });
-
-  let aggG = { total: 0, present: 0, hours: 0, arrivals: 0, ontime: 0 };
-  visibleEmps.forEach(e => {
-    const gs = clkEmpGrandStats(e);
-    aggG.total += gs.total; aggG.present += gs.present; aggG.hours += gs.hours;
-    aggG.arrivals += gs.arrivals; aggG.ontime += gs.ontime;
-  });
-  footHtml += `<td class="grand-total-cell num display-num" style="font-size:16px;">${clkFmtTotal(aggG)}</td>`;
-  footHtml += '</tr>';
-
-  document.getElementById('clkHoursFoot').innerHTML = footHtml;
+function deleteHistoryFile(e, id) {
+  e.stopPropagation();
+  const history = loadCSVHistory().filter(en => en.id !== id);
+  localStorage.setItem(HIST_KEY, JSON.stringify(history));
+  renderHistoryModal();
 }
 
 // ── CSV UPLOAD & PREVIEW ────────────────────────────────────
-function clkParseCSV(text) {
-  const existing = new Set(clkRecords.map(r=>`${r.employee}|${r.date}`));
+let pendingCSVRecords = [];
+let pendingCSVFile = '';
+let pendingRawCSV = '';
+
+function parseCSVRecords(text) {
+  const existing = new Set(RAW.map(r=>`${r.employee}|${r.date}`));
   const parsed = []; let cur = null;
   for (const line of text.split('\n')) {
     const parts = line.split(',').map(s=>s.trim());
@@ -824,74 +776,74 @@ function clkParseCSV(text) {
   return parsed;
 }
 
-function clkPreviewCSV(event) {
+function previewCSV(event) {
   const file = event.target.files[0];
   if (!file) return;
   event.target.value = '';
   const reader = new FileReader();
   reader.onload = e => {
-    const records = clkParseCSV(e.target.result);
-    clkPendingCSVRecords = records;
-    clkPendingCSVFile = file.name;
-    clkShowPreviewModal(records, file.name);
+    const rawCSV = e.target.result;
+    const records = parseCSVRecords(rawCSV);
+    pendingCSVRecords = records;
+    pendingCSVFile = file.name;
+    pendingRawCSV = rawCSV;
+    showPreviewModal(records, file.name);
   };
   reader.readAsText(file);
 }
 
-function clkShowPreviewModal(records, filename) {
+function showPreviewModal(records, filename) {
   const newRecs = records.filter(r=>r.isNew);
   const dupRecs = records.filter(r=>!r.isNew);
   const byEmp = {};
   records.forEach(r=>{ if (!byEmp[r.employee]) byEmp[r.employee]=[]; byEmp[r.employee].push(r); });
   const dates = records.map(r=>r.date).sort();
   const period = dates.length ? `${dates[0]} → ${dates[dates.length-1]}` : '';
-  document.getElementById('clkModalTitle').textContent = `Preview · ${filename}`;
-  let body = `<div class="clock-preview-label">Period: ${period}</div>`;
+  document.getElementById('modalTitle').textContent = `Preview · ${filename}`;
+  let body = `<div class="preview-label">Period: ${period}</div>`;
   Object.entries(byEmp).sort((a,b)=>a[0].localeCompare(b[0])).forEach(([emp, recs])=>{
     const empNew = recs.filter(r=>r.isNew);
     const empDup = recs.filter(r=>!r.isNew);
-    const col = getColor(emp);
-    body += `<div class="clock-preview-block">
-      <div class="clock-preview-name">
+    const col = COLORS[emp]||'#888';
+    body += `<div class="preview-emp-block">
+      <div class="preview-emp-name">
         <div style="width:7px;height:7px;border-radius:50%;background:${col};flex-shrink:0;"></div>
         ${emp}
-        ${empNew.length ? `<span class="clock-preview-badge clock-preview-new">+${empNew.length} new</span>` : ''}
-        ${empDup.length ? `<span class="clock-preview-badge clock-preview-dup">${empDup.length} already exist</span>` : ''}
+        ${empNew.length ? `<span class="preview-badge preview-new">+${empNew.length} new</span>` : ''}
+        ${empDup.length ? `<span class="preview-badge preview-dup">${empDup.length} already exist</span>` : ''}
       </div>
-      <div class="clock-preview-rows">`;
+      <div class="preview-rows">`;
     const toShow = empNew.slice(0,6);
     toShow.forEach(r=>{
       const ti = r.time_in||'—', to=r.time_out||'—';
       const wh = r.work_hours>0.05?r.work_hours.toFixed(1)+'h':'—';
       const flag = r.missing_out?' ⚠ missing OUT':'';
-      body += `<div class="clock-preview-row-new">+ ${r.date} ${r.day}  IN:${ti}  OUT:${to}  ${wh}${flag}</div>`;
+      body += `<div class="preview-row-new">+ ${r.date} ${r.day}  IN:${ti}  OUT:${to}  ${wh}${flag}</div>`;
     });
-    if (empNew.length > 6) body += `<div style="color:var(--t3);font-size:10px;">  ... and ${empNew.length-6} more new records</div>`;
-    if (empDup.length > 0) body += `<div style="color:var(--t3);font-size:10px;">(${empDup.length} duplicate records will be skipped)</div>`;
+    if (empNew.length > 6) body += `<div style="color:var(--tx3);font-size:10px;">  … and ${empNew.length-6} more new records</div>`;
+    if (empDup.length > 0) body += `<div style="color:var(--tx3);font-size:10px;">(${empDup.length} duplicate records will be skipped)</div>`;
     body += `</div></div>`;
   });
-  document.getElementById('clkModalBody').innerHTML = body;
-  document.getElementById('clkModalSummary').textContent = `${newRecs.length} new records · ${dupRecs.length} duplicates skipped`;
-  document.getElementById('clkModal').classList.add('open');
+  document.getElementById('modalBody').innerHTML = body;
+  document.getElementById('modalSummary').textContent = `${newRecs.length} new records · ${dupRecs.length} duplicates skipped`;
+  document.getElementById('csvModal').classList.add('open');
 }
 
-function clkCloseModal() {
-  document.getElementById('clkModal').classList.remove('open');
-  clkPendingCSVRecords = [];
+function closeModal() {
+  document.getElementById('csvModal').classList.remove('open');
+  pendingCSVRecords = [];
 }
 
-async function clkConfirmUpload() {
-  const newRecs = clkPendingCSVRecords.filter(r=>r.isNew);
-  if (!newRecs.length) { clkCloseModal(); return; }
+async function confirmUpload() {
+  const newRecs = pendingCSVRecords.filter(r=>r.isNew);
+  if (!newRecs.length) { closeModal(); return; }
 
-  // Group by employee to ensure all employees exist
   const empNames = [...new Set(newRecs.map(r=>r.employee))];
   const empIds = {};
   for (const name of empNames) {
     empIds[name] = await ensureEmployee(name);
   }
 
-  // Build rows for upsert
   const rows = newRecs.map(r => ({
     employee_id: empIds[r.employee],
     date: r.date,
@@ -903,26 +855,23 @@ async function clkConfirmUpload() {
     source: 'csv',
   }));
 
-  // Upsert in batches of 500
   let added = 0;
   for (let i = 0; i < rows.length; i += 500) {
     const batch = rows.slice(i, i + 500);
     const { error } = await supabase
       .from('clock_records')
       .upsert(batch, { onConflict: 'employee_id,date' });
-
     if (error) {
       console.error('Clock upload error:', error);
-      clkNotify('Error uploading records');
-      clkCloseModal();
+      notify('Error uploading records');
+      closeModal();
       return;
     }
     added += batch.length;
   }
 
-  // Also update local state so UI refreshes without re-fetching
   newRecs.forEach(r => {
-    clkRecords.push({
+    RAW.push({
       employee: r.employee,
       employee_id: empIds[r.employee],
       date: r.date,
@@ -932,39 +881,501 @@ async function clkConfirmUpload() {
       work_hours: r.work_hours,
       missing_out: r.missing_out,
     });
+    if (!activeStatus.hasOwnProperty(r.employee)) activeStatus[r.employee] = true;
   });
 
-  clkCloseModal();
+  saveCSVToHistory(pendingCSVFile, pendingCSVRecords, pendingRawCSV);
+  closeModal();
   buildClean();
-  clkRenderMonthFilters();
-  clkRenderAll();
-  clkNotify(`Imported ${added} records from ${clkPendingCSVFile}`);
+  renderMonthFilters();
+  renderAll();
+  notify(`Imported ${added} records from ${pendingCSVFile}`);
 }
 
 // ── NOTIFY ────────────────────────────────────────────────
-function clkNotify(msg) {
-  const el=document.getElementById('clkNotif');
+function notify(msg) {
+  const el=document.getElementById('notif');
   if (!el) return;
   el.textContent=msg; el.style.display='block';
   setTimeout(()=>el.style.display='none',2500);
 }
 
-// ── EXPORT TO WINDOW ──────────────────────────────────────
+// ── BIRTHDAY CALENDAR ──────────────────────────────────────
+const BDAY_TODAY = new Date();
+BDAY_TODAY.setHours(0,0,0,0);
+let bdayCalY = BDAY_TODAY.getFullYear();
+let bdayCalM = BDAY_TODAY.getMonth();
+let bdayFilter = 'all';
+let bdayCalView = 'month';
+let bdayTblView = 'birthdays';
+let bdayPage = 0;
+const BDAY_PAGE_SIZE = 10;
+
+let BDAYS = [
+  {name:'Alberto Doniga Lara',dob:'1985-04-23',type:'Inversionista'},
+  {name:'Alejandra Barrios Gomez',dob:'1962-04-19',type:'Inversionista'},
+  {name:'Alejandro Espinosa Rivera',dob:'1999-09-24',type:'Inversionista'},
+  {name:'Ana Maria Lopez',dob:'1970-07-29',type:'Inversionista'},
+  {name:'Andres Ollivier',dob:'1995-01-09',type:'Inversionista'},
+  {name:'Celine Boutier',dob:'1993-11-10',type:'Inversionista'},
+  {name:'Christopher Freimund',dob:'1992-10-01',type:'Inversionista'},
+  {name:'Daniel Tobon Camelo',dob:'1985-01-26',type:'Inversionista'},
+  {name:'Daniel Uruñuela Lopez',dob:'1992-10-20',type:'Inversionista'},
+  {name:'Daniel Álvarez',dob:'2002-12-01',type:'Empleado'},
+  {name:'Daniela Rivera-Torres',dob:'1991-04-03',type:'Inversionista'},
+  {name:'Deborah Posternak',dob:'2002-08-15',type:'Empleado'},
+  {name:'Diego Vargas Rivero',dob:'1983-04-29',type:'Inversionista'},
+  {name:'Eduardo Torres Marcellan',dob:'1986-03-07',type:'Inversionista'},
+  {name:'Erick Nasser Nehme',dob:'1989-04-04',type:'Inversionista'},
+  {name:'Ernesto Vargas Guajardo',dob:'1955-08-20',type:'Inversionista'},
+  {name:'Esteban P Gonzalez Beckmann',dob:'2000-05-19',type:'Inversionista'},
+  {name:'Gabino Fraga Jesterhoudt',dob:'1996-11-16',type:'Inversionista'},
+  {name:'Gazi Nacif Borge',dob:'1944-12-28',type:'Inversionista'},
+  {name:'Gerardo Nasser Nehme',dob:'1986-04-23',type:'Inversionista'},
+  {name:'Griselda O Cadiz Salazar',dob:'1955-02-13',type:'Inversionista'},
+  {name:'Guillermo Manzur Juan',dob:'1982-07-19',type:'Inversionista'},
+  {name:'Horacio Morales Reyes',dob:'1974-07-19',type:'Inversionista'},
+  {name:'Héctor Miranda',dob:'2000-09-03',type:'Empleado'},
+  {name:'Jacobo Levy Chayo',dob:'1969-09-25',type:'Inversionista'},
+  {name:'Javier Amescua Lopez',dob:'1996-08-10',type:'Inversionista'},
+  {name:'Jorge Alberto Lopez Perera',dob:'1965-05-14',type:'Inversionista'},
+  {name:'Jose Antonio Juan Chelala',dob:'2002-08-15',type:'Inversionista'},
+  {name:'Jose Antonio Manzur Juan',dob:'1994-05-19',type:'Inversionista'},
+  {name:'Jose Patricio Manzur Juan',dob:'1993-01-10',type:'Inversionista'},
+  {name:'Juan Pablo Alverde Gonzalez',dob:'1982-04-02',type:'Inversionista'},
+  {name:'Luis Catan',dob:'1995-06-06',type:'Empleado'},
+  {name:"Luis Rodrigo Martinez O'Cadiz",dob:'1983-08-25',type:'Inversionista'},
+  {name:'Marco Antonio Fraiha Haddad',dob:'1971-03-31',type:'Inversionista'},
+  {name:'Maria Fernanda Lira Solis',dob:'1995-04-07',type:'Inversionista'},
+  {name:'Maria Gabriela Lopez Butron',dob:'1993-11-09',type:'Inversionista'},
+  {name:'Mariana Rivera-Torres',dob:'1993-08-23',type:'Inversionista'},
+  {name:'Miguel Angel Osorio',dob:'1996-06-15',type:'Inversionista'},
+  {name:'Miguel Ángel Gonzalez',dob:'1991-10-17',type:'Inversionista'},
+  {name:'Mimoun Cadosch',dob:'1991-07-05',type:'Inversionista'},
+  {name:'Neto Vargas',dob:'1981-03-10',type:'Inversionista'},
+  {name:'Octavio Zavala',dob:'1994-04-07',type:'Inversionista'},
+  {name:'Oliver Brett',dob:'1990-11-14',type:'Inversionista'},
+  {name:'Pablo Valles',dob:'1996-08-05',type:'Empleado'},
+  {name:'Robegrill Group LLC',dob:'1968-07-10',type:'Inversionista'},
+  {name:'Santiago Alvarez Bringas',dob:'1998-10-07',type:'Empleado'},
+  {name:'Santiago Bernardo Tobon Salazar',dob:'1987-09-05',type:'Inversionista'},
+  {name:'Santiago Carranza',dob:'1992-05-19',type:'Empleado'},
+  {name:'Óscar Córdova',dob:'1988-05-04',type:'Empleado'},
+];
+
+function bdayDaysUntil(dob) {
+  const d = new Date(dob + 'T00:00:00');
+  const next = new Date(BDAY_TODAY.getFullYear(), d.getMonth(), d.getDate());
+  if (next < BDAY_TODAY) next.setFullYear(BDAY_TODAY.getFullYear() + 1);
+  return Math.round((next - BDAY_TODAY) / 864e5);
+}
+function bdayAge(dob) {
+  const d = new Date(dob + 'T00:00:00');
+  const n = new Date(BDAY_TODAY.getFullYear(), d.getMonth(), d.getDate());
+  return BDAY_TODAY.getFullYear() - d.getFullYear() - (BDAY_TODAY < n ? 1 : 0);
+}
+function bdayInitials(name) {
+  return name.split(' ').slice(0,2).map(x=>x[0]||'').join('').toUpperCase();
+}
+function bdayFmtDate(dob) {
+  const d = new Date(dob + 'T00:00:00');
+  return d.toLocaleDateString('en-US', {month:'long', day:'numeric'});
+}
+function filteredBdays() {
+  if (bdayFilter === 'all') return BDAYS;
+  return BDAYS.filter(b => b.type === bdayFilter);
+}
+
+function renderBdayUpcoming() {
+  const list = BDAYS
+    .map(b => ({...b, days: bdayDaysUntil(b.dob)}))
+    .filter(b => b.days <= 30)
+    .sort((a,b) => a.days - b.days);
+  const el = document.getElementById('bdayUpcomingList');
+  if (!el) return;
+  if (!list.length) {
+    el.innerHTML = '<div class="bday-empty">No birthdays in the next 30 days</div>';
+    return;
+  }
+  const MN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  el.innerHTML = list.map(b => {
+    const ini = bdayInitials(b.name);
+    const avCls = b.type === 'Empleado' ? 'bday-av-emp' : 'bday-av-inv';
+    const d = new Date(b.dob + 'T00:00:00');
+    const fd = MN[d.getMonth()] + ' ' + d.getDate();
+    const isToday = b.days === 0;
+    const isSoon = b.days <= 3;
+    const rowCls = isToday ? 'today-row' : '';
+    const badgeCls = isToday ? 'bday-badge-today' : isSoon ? 'bday-badge-soon' : 'bday-badge-normal';
+    const badgeTxt = isToday ? '🎂 Today!' : b.days === 1 ? 'Tomorrow' : b.days + 'd';
+    const typeLbl = b.type === 'Empleado' ? 'Employee' : 'Investor';
+    return `<div class="bday-upcoming-item ${rowCls}">
+      <div class="bday-av ${avCls}">${ini}</div>
+      <div style="flex:1;min-width:0">
+        <div class="bday-name">${b.name}</div>
+        <div class="bday-date-lbl">${fd} · ${typeLbl}</div>
+      </div>
+      <div class="bday-days-badge ${badgeCls}">${badgeTxt}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderBdayCalendar() {
+  if (bdayCalView === 'month') renderBdayMonthView();
+  else renderBdayYearView();
+}
+
+function renderBdayMonthView() {
+  const MN_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const lbl = document.getElementById('bdayMonthLbl');
+  const grid = document.getElementById('bdayGrid');
+  if (!lbl || !grid) return;
+  lbl.textContent = MN_LONG[bdayCalM] + ' ' + bdayCalY;
+
+  const first = new Date(bdayCalY, bdayCalM, 1).getDay();
+  const dim   = new Date(bdayCalY, bdayCalM + 1, 0).getDate();
+  const prevDim = new Date(bdayCalY, bdayCalM, 0).getDate();
+  const todayStr = BDAY_TODAY.toISOString().slice(0,10);
+  const mm = String(bdayCalM + 1).padStart(2,'0');
+
+  const dayMap = {};
+  filteredBdays().forEach(b => {
+    const d = new Date(b.dob + 'T00:00:00');
+    if (d.getMonth() === bdayCalM) {
+      const day = d.getDate();
+      if (!dayMap[day]) dayMap[day] = [];
+      dayMap[day].push(b);
+    }
+  });
+
+  let html = '';
+  for (let i = 0; i < first; i++) {
+    html += `<div class="bday-cell other-month"><div class="bday-num">${prevDim - first + 1 + i}</div></div>`;
+  }
+  for (let d = 1; d <= dim; d++) {
+    const dd = String(d).padStart(2,'0');
+    const dateStr = `${bdayCalY}-${mm}-${dd}`;
+    const dow = new Date(dateStr + 'T00:00:00').getDay();
+    const isToday   = dateStr === todayStr;
+    const isHoliday = HOLIDAYS.has(dateStr);
+    const isWeekend = dow === 0 || dow === 6;
+    const bds = dayMap[d] || [];
+    const hasBday = bds.length > 0;
+    let cls = 'bday-cell';
+    if (isToday)   cls += ' today-cell';
+    if (isHoliday) cls += ' is-holiday';
+    if (isWeekend) cls += ' is-weekend';
+    if (hasBday)   cls += ' has-bday';
+    const dotsHtml = bds.map(b =>
+      `<div class="bday-dot ${b.type==='Empleado'?'bday-dot-emp':'bday-dot-inv'}" title="${b.name}"></div>`
+    ).join('');
+    const holidayName = isHoliday ? (HOLIDAY_NAMES[dateStr] || 'NYSE Holiday') : '';
+    const shortHol = holidayName.replace("'s Day","").replace(" Day","").replace("Independence","Indep.").replace("Thanksgiving","Thanks.");
+    html += `<div class="${cls}" ${hasBday?`onclick="showBdayPopover(event,${d})"`:''}}>
+      <div class="bday-num">${d}</div>
+      ${hasBday ? `<div class="bday-dots">${dotsHtml}</div>` : ''}
+      ${isHoliday ? `<div class="bday-holiday-lbl" title="${holidayName}">${shortHol}</div>` : ''}
+    </div>`;
+  }
+  const trailing = (7 - ((first + dim) % 7)) % 7;
+  for (let i = 1; i <= trailing; i++) {
+    html += `<div class="bday-cell other-month"><div class="bday-num">${i}</div></div>`;
+  }
+  grid.innerHTML = html;
+}
+
+function renderBdayYearView() {
+  const lbl = document.getElementById('bdayYearLbl');
+  const grid = document.getElementById('bdayAnnualGrid');
+  if (!lbl || !grid) return;
+  lbl.textContent = bdayCalY;
+  const MN = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const todayStr = BDAY_TODAY.toISOString().slice(0,10);
+  const bdayDates = new Set();
+  filteredBdays().forEach(b => {
+    const d = new Date(b.dob + 'T00:00:00');
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    const dd = String(d.getDate()).padStart(2,'0');
+    bdayDates.add(`${bdayCalY}-${mm}-${dd}`);
+  });
+
+  let html = '';
+  for (let m = 0; m < 12; m++) {
+    const firstDay = new Date(bdayCalY, m, 1).getDay();
+    const daysInMonth = new Date(bdayCalY, m + 1, 0).getDate();
+    const mm = String(m + 1).padStart(2,'0');
+    let mHtml = `<div class="mini-cal"><div class="mini-cal-title">${MN[m]}</div><div class="mini-cal-grid">`;
+    mHtml += 'SMTWTFS'.split('').map(c=>`<div class="mini-dow">${c}</div>`).join('');
+    for (let i = 0; i < firstDay; i++) mHtml += `<div class="mini-day other-month"></div>`;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dd2 = String(d).padStart(2,'0');
+      const dateStr = `${bdayCalY}-${mm}-${dd2}`;
+      const dow = new Date(dateStr + 'T00:00:00').getDay();
+      const isToday   = dateStr === todayStr;
+      const isHoliday = HOLIDAYS.has(dateStr);
+      const isWeekend = dow === 0 || dow === 6;
+      const hasBday   = bdayDates.has(dateStr);
+      let cls = 'mini-day';
+      if (isToday)        cls += ' today';
+      else if (isHoliday) cls += ' holiday';
+      else if (isWeekend) cls += ' weekend';
+      if (hasBday && !isToday) cls += ' has-bday-dot';
+      const tip = isHoliday ? ` title="${HOLIDAY_NAMES[dateStr]||'NYSE Holiday'}"` : '';
+      mHtml += `<div class="${cls}"${tip}>${d}</div>`;
+    }
+    const trailing = (7 - ((firstDay + daysInMonth) % 7)) % 7;
+    for (let i = 0; i < trailing; i++) mHtml += `<div class="mini-day other-month"></div>`;
+    mHtml += `</div></div>`;
+    html += mHtml;
+  }
+  grid.innerHTML = html;
+}
+
+function showBdayPopover(e, day) {
+  const pop = document.getElementById('bdayPopover');
+  const bds = filteredBdays().filter(b => {
+    const d = new Date(b.dob + 'T00:00:00');
+    return d.getMonth() === bdayCalM && d.getDate() === day;
+  });
+  if (!bds.length) { pop.classList.remove('open'); return; }
+  const MN_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  pop.innerHTML = `<div class="bday-pop-date">${MN_SHORT[bdayCalM]} ${day}, ${bdayCalY}</div>` +
+    bds.map(b => `<div class="bday-pop-item">
+      <div class="bday-av ${b.type==='Empleado'?'bday-av-emp':'bday-av-inv'}" style="width:26px;height:26px;font-size:10px">${bdayInitials(b.name)}</div>
+      <div><div class="bday-pop-name">${b.name}</div><div class="bday-pop-type">${b.type==='Empleado'?'Employee':'Investor'} · turns ${bdayAge(b.dob)}</div></div>
+    </div>`).join('');
+  const rect = e.currentTarget.getBoundingClientRect();
+  pop.style.left = Math.min(rect.left + rect.width / 2, window.innerWidth - 260) + 'px';
+  pop.style.top = (rect.bottom + window.scrollY + 6) + 'px';
+  pop.classList.add('open');
+  e.stopPropagation();
+}
+
+function renderBdayTable() {
+  if (bdayTblView === 'birthdays') renderBdayBirthdays();
+  else renderBdayHolidays();
+}
+
+function renderBdayBirthdays() {
+  const q = (document.getElementById('bdaySearch')?.value || '').toLowerCase();
+  let rows = filteredBdays()
+    .map(b => ({...b, days: bdayDaysUntil(b.dob), age: bdayAge(b.dob)}))
+    .filter(b => !q || b.name.toLowerCase().includes(q))
+    .sort((a,b) => a.days - b.days);
+
+  const total = rows.length;
+  const totalPages = Math.ceil(total / BDAY_PAGE_SIZE) || 1;
+  if (bdayPage >= totalPages) bdayPage = 0;
+  const slice = rows.slice(bdayPage * BDAY_PAGE_SIZE, (bdayPage + 1) * BDAY_PAGE_SIZE);
+
+  const countEl = document.getElementById('bdayTblCount');
+  if (countEl) countEl.textContent = total + ' people';
+  renderBdayPagination(total, totalPages);
+
+  const bodyEl = document.getElementById('bdayTblBody');
+  if (!bodyEl) return;
+  bodyEl.innerHTML = slice.map(b => {
+    const fd = bdayFmtDate(b.dob);
+    const isToday = b.days === 0;
+    const isSoon  = b.days <= 7;
+    let badgeBg, badgeColor;
+    if (isToday)     { badgeBg='var(--vlate-bg)'; badgeColor='var(--vlate)'; }
+    else if (isSoon) { badgeBg='var(--late-bg)'; badgeColor='var(--late)'; }
+    else             { badgeBg='var(--s2)'; badgeColor='var(--tx3)'; }
+    const badgeTxt = isToday ? '🎂 Today!' : b.days + ' days';
+    const typeBadge = b.type === 'Empleado'
+      ? `<span style="display:inline-flex;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:500;background:var(--late-bg);color:var(--late)">Employee</span>`
+      : `<span style="display:inline-flex;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:500;background:#dbeafe;color:#1d4ed8">Investor</span>`;
+    return `<tr>
+      <td>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="bday-av ${b.type==='Empleado'?'bday-av-emp':'bday-av-inv'}" style="width:26px;height:26px;font-size:9px;flex-shrink:0">${bdayInitials(b.name)}</div>
+          <span style="font-weight:500">${b.name}</span>
+        </div>
+      </td>
+      <td>${typeBadge}</td>
+      <td style="color:var(--tx2)">${fd}</td>
+      <td style="color:var(--tx3)">${b.age} yrs</td>
+      <td><span style="display:inline-flex;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:500;background:${badgeBg};color:${badgeColor}">${badgeTxt}</span></td>
+      <td><button class="bday-rm-btn" onclick="removeBday('${b.name.replace(/'/g,"\\'")}')">✕</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function renderBdayHolidays() {
+  const todayStr = BDAY_TODAY.toISOString().slice(0,10);
+  const dates = [...HOLIDAYS].sort();
+  const total = dates.length;
+  const totalPages = Math.ceil(total / BDAY_PAGE_SIZE) || 1;
+  if (bdayPage >= totalPages) bdayPage = 0;
+  const slice = dates.slice(bdayPage * BDAY_PAGE_SIZE, (bdayPage + 1) * BDAY_PAGE_SIZE);
+
+  const countEl = document.getElementById('bdayTblCount');
+  if (countEl) countEl.textContent = total + ' holidays';
+  renderBdayPagination(total, totalPages);
+
+  const bodyEl = document.getElementById('bdayHolBody');
+  if (!bodyEl) return;
+  const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  bodyEl.innerHTML = slice.map(d => {
+    const dow = new Date(d + 'T00:00:00').getDay();
+    const name = HOLIDAY_NAMES[d] || 'NYSE Holiday';
+    const fmt = new Date(d + 'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    let pill;
+    if (d < todayStr)       pill = `<span style="display:inline-flex;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:500;background:var(--s2);color:var(--tx3)">Past</span>`;
+    else if (d === todayStr) pill = `<span style="display:inline-flex;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:500;background:var(--late-bg);color:var(--late)">Today</span>`;
+    else                    pill = `<span style="display:inline-flex;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:500;background:var(--ontime-bg);color:var(--ontime)">Upcoming</span>`;
+    return `<tr>
+      <td style="color:var(--tx2)">${fmt}</td>
+      <td style="color:var(--tx3)">${DAY_NAMES[dow]}</td>
+      <td style="font-weight:500">${name}</td>
+      <td>${pill}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderBdayPagination(total, totalPages) {
+  const info = document.getElementById('bdayPageInfo');
+  const prev = document.getElementById('bdayPrevBtn');
+  const next = document.getElementById('bdayNextBtn');
+  if (!info) return;
+  const from = total ? bdayPage * BDAY_PAGE_SIZE + 1 : 0;
+  const to   = Math.min((bdayPage + 1) * BDAY_PAGE_SIZE, total);
+  info.textContent = total ? `${from}–${to} of ${total}` : '0';
+  if (prev) prev.disabled = bdayPage === 0;
+  if (next) next.disabled = bdayPage >= totalPages - 1;
+}
+
+function setCalView(view) {
+  bdayCalView = view;
+  document.getElementById('vtoggleMonth').classList.toggle('active', view === 'month');
+  document.getElementById('vtoggleYear').classList.toggle('active', view === 'year');
+  document.getElementById('bdayMonthView').style.display    = view === 'month' ? '' : 'none';
+  document.getElementById('bdayYearView').style.display     = view === 'year'  ? '' : 'none';
+  document.getElementById('bdayMonthNavWrap').style.display  = view === 'month' ? '' : 'none';
+  document.getElementById('bdayYearNavWrap').style.display   = view === 'year'  ? '' : 'none';
+  document.getElementById('bdayFilterWrap').style.display    = view === 'month' ? '' : 'none';
+  renderBdayCalendar();
+}
+
+function setTblView(view, el) {
+  bdayTblView = view;
+  bdayPage = 0;
+  document.querySelectorAll('.bday-tbl-tab').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  const bdayTbl = document.getElementById('bdayBdayTable');
+  const holTbl  = document.getElementById('bdayHolidayTable');
+  const searchEl = document.getElementById('bdaySearch');
+  if (bdayTbl)  bdayTbl.style.display  = view === 'birthdays' ? '' : 'none';
+  if (holTbl)   holTbl.style.display   = view === 'holidays'  ? '' : 'none';
+  if (searchEl) searchEl.style.display = view === 'birthdays' ? '' : 'none';
+  renderBdayTable();
+}
+
+function onBdaySearch() { bdayPage = 0; renderBdayBirthdays(); }
+function bdayPagePrev() { if (bdayPage > 0) { bdayPage--; renderBdayTable(); } }
+function bdayPageNext() {
+  const total = bdayTblView === 'birthdays' ? filteredBdays().length : [...HOLIDAYS].length;
+  if ((bdayPage + 1) * BDAY_PAGE_SIZE < total) { bdayPage++; renderBdayTable(); }
+}
+function changeBdayYear(dir) { bdayCalY += dir; renderBdayYearView(); }
+function changeBdayMonth(dir) {
+  bdayCalM += dir;
+  if (bdayCalM > 11) { bdayCalM = 0; bdayCalY++; }
+  if (bdayCalM < 0)  { bdayCalM = 11; bdayCalY--; }
+  renderBdayMonthView();
+}
+function setBdayFilter(f, el) {
+  bdayFilter = f;
+  document.querySelectorAll('.bday-pill').forEach(p => p.classList.remove('active'));
+  if (el) el.classList.add('active');
+  renderBdayCalendar();
+  renderBdayUpcoming();
+  renderBdayTable();
+}
+function addBday() {
+  const name = document.getElementById('bdayName').value.trim();
+  const dob  = document.getElementById('bdayDOB').value;
+  const type = document.getElementById('bdayType').value;
+  if (!name || !dob) return;
+  BDAYS.push({name, dob, type});
+  document.getElementById('bdayAddModal').classList.remove('open');
+  ['bdayName','bdayDOB','bdayEmail'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
+  renderBdayAll();
+}
+function removeBday(name) {
+  if (!confirm('Remove ' + name + '?')) return;
+  BDAYS = BDAYS.filter(b => b.name !== name);
+  renderBdayAll();
+}
+function renderBdayAll() {
+  renderBdayUpcoming();
+  renderBdayCalendar();
+  renderBdayTable();
+}
+
+// ── INIT ──────────────────────────────────────────────────
+async function clockInit() {
+  try {
+    await loadFromSupabase();
+    bridgeToV3();
+  } catch (err) {
+    console.warn('Clock: Supabase load failed', err);
+  }
+
+  buildClean();
+  renderMonthFilters();
+  renderAll();
+
+  // Modal overlay close-on-backdrop-click
+  ['editRecModal','inactiveModal','manageModal','histModal','csvModal','bdayAddModal'].forEach(id => {
+    document.getElementById(id)?.addEventListener('click', e => {
+      if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
+    });
+  });
+
+  // Close birthday popover on outside click
+  document.addEventListener('click', e => {
+    const pop = document.getElementById('bdayPopover');
+    if (pop && !pop.contains(e.target)) pop.classList.remove('open');
+  });
+}
+
+// ── EXPORT ────────────────────────────────────────────────
 export function loadClockPage() {
   clockInit();
 }
 
-window._clkSelectYear = clkSelectYear;
-window._clkSelectMonth = clkSelectMonth;
-window._clkToggleDetail = clkToggleDetail;
-window._clkToggleEmp = clkToggleEmp;
-window._clkToggleShowInactive = clkToggleShowInactive;
-window._clkPreviewCSV = clkPreviewCSV;
-window._clkCloseModal = clkCloseModal;
-window._clkConfirmUpload = clkConfirmUpload;
-window._clkRenderAll = clkRenderAll;
-window._clkToggleYear = clkToggleYear;
-window._clkExpandAllYears = clkExpandAllYears;
-window._clkCollapseAllYears = clkCollapseAllYears;
-window._clkSetMetric = clkSetMetric;
-window._clkToggleTableInactive = clkToggleTableInactive;
+// ── WINDOW EXPORTS (for inline onclick handlers) ──────────
+window.switchTab = switchTab;
+window.selectYear = selectYear;
+window.selectMonth = selectMonth;
+window.toggleDetail = toggleDetail;
+window.toggleEmp = toggleEmp;
+window.openManageModal = openManageModal;
+window.openInactiveModal = openInactiveModal;
+window.renderInactiveModal = renderInactiveModal;
+window.renderManageModal = renderManageModal;
+window.addManualEmployee = addManualEmployee;
+window.removeManualEmployee = removeManualEmployee;
+window.previewCSV = previewCSV;
+window.closeModal = closeModal;
+window.confirmUpload = confirmUpload;
+window.saveRecordEdit = saveRecordEdit;
+window.openHistoryModal = openHistoryModal;
+window.viewHistoryFile = viewHistoryFile;
+window.deleteHistoryFile = deleteHistoryFile;
+window.setMetric = setMetric;
+window.openRecordEdit = openRecordEdit;
+window.renderAll = renderAll;
+window.changeBdayMonth = changeBdayMonth;
+window.changeBdayYear = changeBdayYear;
+window.setBdayFilter = setBdayFilter;
+window.setCalView = setCalView;
+window.setTblView = setTblView;
+window.onBdaySearch = onBdaySearch;
+window.bdayPagePrev = bdayPagePrev;
+window.bdayPageNext = bdayPageNext;
+window.addBday = addBday;
+window.removeBday = removeBday;
+window.showBdayPopover = showBdayPopover;
