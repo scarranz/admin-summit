@@ -1,6 +1,6 @@
 // Revenue page module
 import { supabase } from './supabase-client.js';
-import { YEARS, MONTH_NAMES, MONTH_NAMES_FULL, fmt, fmtTotal, showToast, showInfoModal, showConfirmModal } from './utils.js';
+import { YEARS, MONTH_NAMES, MONTH_NAMES_FULL, fmt, fmtTotal, showToast, showInfoModal, showConfirmModal, scrollTableToRight } from './utils.js';
 import { recomputeAccountTotals } from './projection.js';
 
 // ─── Constants ───
@@ -119,6 +119,7 @@ export async function loadRevenuePage() {
     _dataLoaded = true;
   }
   renderRevenue();
+  scrollTableToRight('revenueTable');
 }
 
 // ─── Persistence helpers ───
@@ -1235,6 +1236,64 @@ export function renderRevenue() {
   renderRevenueFoot();
   renderRevenueChart();
   updateClearProjBtnVisibility();
+  renderSyncTimestamp();
+}
+
+// ─── Sync from API ───
+
+const SYNC_TS_KEY = 'rev_last_sync';
+
+function renderSyncTimestamp() {
+  const el = document.getElementById('syncRevenueTs');
+  if (!el) return;
+  const iso = localStorage.getItem(SYNC_TS_KEY);
+  if (!iso) { el.textContent = ''; return; }
+  const d = new Date(iso);
+  el.textContent = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+async function syncRevenueFromApi() {
+  const btn = document.getElementById('syncRevenueBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Syncing…'; }
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { showToast('Not authenticated', 'error'); return; }
+
+    const res = await fetch('/.netlify/functions/sync-revenue', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+    });
+
+    const payload = await res.json();
+
+    if (!res.ok) {
+      showToast(`Sync failed: ${payload.error || res.status}`, 'error');
+      return;
+    }
+
+    // Record timestamp and force data reload
+    localStorage.setItem(SYNC_TS_KEY, new Date().toISOString());
+    _dataLoaded = false;
+    await loadRevenuePage();
+
+    // Build result summary for modal
+    const lines = [];
+    if (payload.created && payload.created.length > 0) {
+      lines.push(`<b>${payload.created.length} new account${payload.created.length > 1 ? 's' : ''} created:</b>`);
+      payload.created.forEach(c => lines.push(`&nbsp;&nbsp;· ${c.bank} / ${c.name}`));
+    }
+    lines.push(`${payload.synced} cell${payload.synced !== 1 ? 's' : ''} synced`);
+    if (payload.skipped_manual > 0) lines.push(`${payload.skipped_manual} manual cell${payload.skipped_manual !== 1 ? 's' : ''} preserved`);
+    if (payload.skipped_gs > 0) lines.push(`${payload.skipped_gs} GS row${payload.skipped_gs !== 1 ? 's' : ''} skipped (manual-only bank)`);
+
+    showInfoModal('Sync complete', 'Revenue', lines.join('<br>'));
+  } catch (e) {
+    console.error('Sync error:', e);
+    showToast('Sync failed — check console', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '↓ Update'; }
+  }
 }
 
 // ─── Window-level handlers (for onclick in HTML) ───
@@ -1253,3 +1312,4 @@ window._setGranularity = setGranularity;
 window._setChartType = setChartType;
 window._setChartRange = setChartRange;
 window._toggleRevMonthCompare = toggleRevMonthCompare;
+window._syncRevenueFromApi = syncRevenueFromApi;

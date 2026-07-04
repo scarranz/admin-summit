@@ -150,6 +150,8 @@
         <button class="inactive-link" onclick="window._toggleShowInactive()" id="hiddenToggleBtn">Show inactive</button>
         <button class="inactive-link" onclick="window._projectRevenueRestOfYear()" style="margin-left: 12px;">Projection</button>
         <button class="inactive-link" onclick="window._clearRevenueProjections()" id="clearProjBtn" style="margin-left: 12px; display:none;">Clear projections</button>
+        <button class="inactive-link" onclick="window._syncRevenueFromApi()" id="syncRevenueBtn" style="margin-left: 20px; border-left: 1px solid var(--border); padding-left: 20px;">↓ Update</button>
+        <span id="syncRevenueTs" style="margin-left: 8px; font-size: 11px; color: var(--t3);"></span>
       </div>
       <div class="rev-table-wrap">
         <div class="rev-table-scroll">

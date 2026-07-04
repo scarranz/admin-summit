@@ -1,6 +1,6 @@
 // Office Expenses page module
 import { supabase } from './supabase-client.js';
-import { YEARS, MONTH_NAMES, MONTH_NAMES_FULL, fmtUsd, fmtUsdShort, fmtMxn, showToast, showInfoModal, showConfirmModal, yearMonthKey } from './utils.js';
+import { YEARS, MONTH_NAMES, MONTH_NAMES_FULL, fmtUsd, fmtUsdShort, fmtMxn, showToast, showInfoModal, showConfirmModal, yearMonthKey, scrollTableToRight } from './utils.js';
 import { recomputeLineTotals } from './projection.js';
 import { toggleFxEditor, renderFxEditor, FX_RATES, fxRate, mxnToUsd } from './fx.js';
 
@@ -1932,6 +1932,7 @@ export async function loadOfficePage() {
     _dataLoaded = true;
   }
   renderOfficeExpenses();
+  scrollTableToRight('expCategoryTable');
 }
 
 // ─── Delete line item ───

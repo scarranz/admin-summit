@@ -37,18 +37,6 @@ export function nav(page) {
     _pageLoaders[page]();
   }
 
-  // Auto-scroll tables to the right
-  const tableIdByPage = { revenue: 'revenueTable', payroll: 'payrollTable', office: 'expCategoryTable' };
-  const tableId = tableIdByPage[page];
-  if (tableId) {
-    setTimeout(() => {
-      const tbl = document.getElementById(tableId);
-      if (tbl) {
-        const scroller = tbl.closest('.rev-table-scroll');
-        if (scroller) scroller.scrollLeft = scroller.scrollWidth;
-      }
-    }, 150);
-  }
 }
 
 export function getCurrentPage() { return _currentPage; }

@@ -1,6 +1,6 @@
 // ═══════════════ PAYROLL ═══════════════
 import { supabase } from './supabase-client.js';
-import { YEARS, MONTH_NAMES, fmt, fmtMxn, fmtMargin, marginCls, showToast } from './utils.js';
+import { YEARS, MONTH_NAMES, fmt, fmtMxn, fmtMargin, marginCls, showToast, scrollTableToRight } from './utils.js';
 import { FX_RATES, FX_FALLBACK, fxRate, editFxCell } from './fx.js';
 import { totalMonth, totalYear } from './revenue.js';
 import { destroyChart, storeChart } from './charts.js';
@@ -231,6 +231,7 @@ export async function loadPayrollPage() {
     _dataLoaded = true;
   }
   renderPayroll();
+  scrollTableToRight('payrollTable');
 }
 
 // ─── Supabase persistence helpers ───

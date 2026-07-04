@@ -1,8 +1,10 @@
 {
   "scripts": {
+    "dev": "netlify dev",
     "sync-fees": "node scripts/sync-fees.js"
   },
   "devDependencies": {
+    "netlify-cli": "^26.1.0",
     "pg": "^8.21.0"
   },
   "dependencies": {

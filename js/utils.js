@@ -64,6 +64,15 @@ export function yearMonthKey(year, month) {
   return `${year}-${String(month).padStart(2, '0')}`;
 }
 
+export function scrollTableToRight(tableId) {
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const tbl = document.getElementById(tableId);
+    if (!tbl) return;
+    const scroller = tbl.closest('.rev-table-scroll');
+    if (scroller) scroller.scrollLeft = scroller.scrollWidth;
+  }));
+}
+
 // ─── Styled modals (replaces browser alert/confirm) ───
 
 export function showInfoModal(title, detail, message) {
