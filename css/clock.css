@@ -185,6 +185,7 @@
 
 /* NOTIFICATION */
 .notif { position: fixed; bottom: 20px; right: 20px; background: var(--accent); color: var(--accent-text); padding: 9px 16px; border-radius: var(--radius); font-size: 12px; display: none; box-shadow: 0 4px 20px rgba(0,0,0,.15); z-index: 300; }
+.notif.error { background: #c92a2a; color: #fff; }
 
 /* INACTIVE TOGGLE ROW */
 .inactive-toggle-row { display: flex; align-items: center; gap: 10px; padding: 9px 16px; border-top: 1px solid var(--border); background: var(--s2); }

@@ -74,6 +74,7 @@ let selectedMonth = 'ytd';
 let activeMetric = 'all';
 let activeTab = 'clock';
 let CLEAN = {};
+let detailStatusFilter = 'all';
 
 // ── SUPABASE LOADING ──────────────────────────────────────
 async function loadFromSupabase() {
@@ -90,11 +91,22 @@ async function loadFromSupabase() {
     clkNameToId[e.name] = e.id;
   });
 
-  const { data: recs, error: recErr } = await supabase
-    .from('clock_records')
-    .select('*, clock_employees!inner(name)')
-    .order('date', { ascending: true });
-  if (recErr) throw recErr;
+  // Supabase/PostgREST caps a single response at 1000 rows by default, so
+  // clock_records (which grows past that after a few months of CSVs) has to
+  // be paged through, or everything past row 1000 silently vanishes on load.
+  const PAGE_SIZE = 1000;
+  let recs = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data: page, error: recErr } = await supabase
+      .from('clock_records')
+      .select('*, clock_employees!inner(name)')
+      .order('date', { ascending: true })
+      .order('employee_id', { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+    if (recErr) throw recErr;
+    recs = recs.concat(page);
+    if (page.length < PAGE_SIZE) break;
+  }
 
   RAW = recs.map(r => ({
     employee: r.clock_employees.name,
@@ -182,7 +194,7 @@ function cleanRecord(r) {
   const cleanIn = inIsOUT ? '' : r.time_in;
   const cleanInMin = inIsOUT ? null : tiMin;
   const mout = !inIsOUT && r.time_in !== '' && (r.time_out === '' || toMin === null) && r.work_hours < 0.1;
-  return { ...r, time_in: cleanIn, time_in_min: cleanInMin, time_out: r.time_out, work_hours: r.work_hours, missing_out: mout };
+  return { ...r, time_in: cleanIn, time_in_min: cleanInMin, time_out: r.time_out, time_out_min: toMin, work_hours: r.work_hours, missing_out: mout };
 }
 
 function mergeDay(recs) {
@@ -200,7 +212,7 @@ function mergeDay(recs) {
   const to = bestOut ? bestOut.time_out : '';
   const wh = Math.max(...cleaned.map(r=>r.work_hours));
   const mout = ti !== '' && (to === '' || parseMin(to) === null) && wh < 0.1;
-  return { ...base, time_in: ti, time_in_min: bestIn?.time_in_min ?? null, time_out: to, work_hours: wh, missing_out: mout };
+  return { ...base, time_in: ti, time_in_min: bestIn?.time_in_min ?? null, time_out: to, time_out_min: bestOut?.time_out_min ?? null, work_hours: wh, missing_out: mout };
 }
 
 function buildClean() {
@@ -251,10 +263,12 @@ function calcStats(days) {
   const late    = arrivals.filter(r=>r.time_in_min>p.lateMin&&r.time_in_min<=p.vLateMin).length;
   const vlate   = arrivals.filter(r=>r.time_in_min>p.vLateMin).length;
   const avgArr  = arrivals.length ? arrivals.reduce((s,r)=>s+r.time_in_min,0)/arrivals.length : null;
+  const departures = workdays.filter(r=>r.time_out_min!==null);
+  const avgDep  = departures.length ? departures.reduce((s,r)=>s+r.time_out_min,0)/departures.length : null;
   const avgHrs  = present>0 ? hours/present : 0;
   const attPct  = total>0 ? (present/total*100) : 0;
   const ontimePct = arrivals.length>0 ? (ontime/arrivals.length*100) : 0;
-  return {total,present,absent,mout,hours,arrivals:arrivals.length,ontime,late,vlate,avgArr,avgHrs,attPct,ontimePct};
+  return {total,present,absent,mout,hours,arrivals:arrivals.length,ontime,late,vlate,avgArr,avgDep,avgHrs,attPct,ontimePct};
 }
 
 function dayStatus(r) {
@@ -344,13 +358,14 @@ const mpill = (v, cls) => v ? `<span class="pill ${cls}">${v}</span>` : '<span s
 
 const METRIC_DEFS = {
   all: {
-    cols: '1fr 90px 80px 100px 80px 80px 90px',
-    headers: ['Employee', 'Attendance', 'On Time', 'Avg Arrival', 'Avg Hours', 'Absences', 'Missing OUT'],
+    cols: '1fr 90px 80px 100px 100px 80px 80px 90px',
+    headers: ['Employee', 'Attendance', 'On Time', 'Avg Arrival', 'Avg Departure', 'Avg Hours', 'Absences', 'Missing OUT'],
     row: (e, s) => `
       <div class="emp-name">${e}</div>
       <div class="cell">${s ? s.attPct.toFixed(0)+'%' : '—'}</div>
       <div class="cell">${s && s.arrivals>0 ? s.ontimePct.toFixed(0)+'%' : '—'}</div>
       <div class="cell mono">${s ? minToStr(s.avgArr) : '—'}</div>
+      <div class="cell mono">${s ? minToStr(s.avgDep) : '—'}</div>
       <div class="cell">${s && s.avgHrs>0 ? s.avgHrs.toFixed(1)+'h' : '—'}</div>
       <div class="cell">${s ? mpill(s.absent>0?s.absent+'d':null,'pill-grey') : '—'}</div>
       <div class="cell">${s ? mpill(s.mout>0?s.mout:null,'pill-purple') : '—'}</div>`
@@ -537,7 +552,13 @@ async function toggleEmp(name) {
 function toggleDetail(emp) {
   if (selectedEmp===emp) { selectedEmp = null; renderTable(); return; }
   selectedEmp = emp;
+  detailStatusFilter = 'all';
   renderTable();
+}
+
+function setDetailStatusFilter(status) {
+  detailStatusFilter = status;
+  if (selectedEmp) renderDetail(selectedEmp);
 }
 
 function renderDetail(emp) {
@@ -560,8 +581,9 @@ function renderDetail(emp) {
   }
   const days = rawDays.sort((a,b)=>b.date.localeCompare(a.date));
   const p = getParams();
+  const filteredDays = detailStatusFilter==='all' ? days : days.filter(r=>dayStatus(r)===detailStatusFilter);
 
-  const rows = days.map(r=>{
+  const rows = filteredDays.map(r=>{
     const st = dayStatus(r);
     const pill = {
       ontime:`<span class="pill pill-good">On time</span>`,
@@ -592,13 +614,19 @@ function renderDetail(emp) {
   }).join('');
 
   const s = calcStats(days);
+  const STATUS_LABELS = {all:'All statuses', ontime:'On time', late:'Late', vlate:'Very late', absent:'Absent', mout:'Missing OUT', holiday:'Holiday'};
+  const statusOptions = Object.entries(STATUS_LABELS).map(([v,label]) =>
+    `<option value="${v}" ${detailStatusFilter===v?'selected':''}>${label}</option>`).join('');
   panel.innerHTML = `
     <div class="detail-header">
       <div style="display:flex;align-items:center;gap:8px;">
         <span class="detail-name">${emp}</span>
         <span style="font-size:10px;color:var(--tx3);">${s.present} days present · ${s.absent} absent · ${s.mout} missing OUT · avg ${minToStr(s.avgArr)} · ${s.avgHrs.toFixed(1)}h/day</span>
       </div>
-      <button class="detail-close" onclick="toggleDetail('${emp}')">Close</button>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <select class="chart-range-select" onchange="setDetailStatusFilter(this.value)">${statusOptions}</select>
+        <button class="detail-close" onclick="toggleDetail('${emp}')">Close</button>
+      </div>
     </div>
     <div class="legend">
       <div class="leg-item"><div class="leg-dot" style="background:var(--ontime-bg);border:1px solid var(--ontime);"></div>On time</div>
@@ -609,7 +637,7 @@ function renderDetail(emp) {
     </div>
     <table class="log-table">
       <thead><tr><th>Date</th><th>Day</th><th>IN</th><th>OUT</th><th>Hours</th><th>Status</th></tr></thead>
-      <tbody>${rows||'<tr><td colspan="6" style="text-align:center;color:var(--tx3);padding:20px;">No records for this period.</td></tr>'}</tbody>
+      <tbody>${rows||`<tr><td colspan="6" style="text-align:center;color:var(--tx3);padding:20px;">${detailStatusFilter==='all'?'No records for this period.':'No records match this status filter.'}</td></tr>`}</tbody>
     </table>`;
 }
 
@@ -838,41 +866,17 @@ async function confirmUpload() {
   const newRecs = pendingCSVRecords.filter(r=>r.isNew);
   if (!newRecs.length) { closeModal(); return; }
 
-  const empNames = [...new Set(newRecs.map(r=>r.employee))];
-  const empIds = {};
-  for (const name of empNames) {
-    empIds[name] = await ensureEmployee(name);
-  }
+  const btn = document.getElementById('csvImportBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
 
-  const rows = newRecs.map(r => ({
-    employee_id: empIds[r.employee],
-    date: r.date,
-    day: r.day,
-    time_in: r.time_in,
-    time_out: r.time_out,
-    work_hours: r.work_hours,
-    missing_out: r.missing_out,
-    source: 'csv',
-  }));
-
-  let added = 0;
-  for (let i = 0; i < rows.length; i += 500) {
-    const batch = rows.slice(i, i + 500);
-    const { error } = await supabase
-      .from('clock_records')
-      .upsert(batch, { onConflict: 'employee_id,date' });
-    if (error) {
-      console.error('Clock upload error:', error);
-      notify('Error uploading records');
-      closeModal();
-      return;
+  try {
+    const empNames = [...new Set(newRecs.map(r=>r.employee))];
+    const empIds = {};
+    for (const name of empNames) {
+      empIds[name] = await ensureEmployee(name);
     }
-    added += batch.length;
-  }
 
-  newRecs.forEach(r => {
-    RAW.push({
-      employee: r.employee,
+    const rows = newRecs.map(r => ({
       employee_id: empIds[r.employee],
       date: r.date,
       day: r.day,
@@ -880,24 +884,58 @@ async function confirmUpload() {
       time_out: r.time_out,
       work_hours: r.work_hours,
       missing_out: r.missing_out,
-    });
-    if (!activeStatus.hasOwnProperty(r.employee)) activeStatus[r.employee] = true;
-  });
+      source: 'csv',
+    }));
 
-  saveCSVToHistory(pendingCSVFile, pendingCSVRecords, pendingRawCSV);
-  closeModal();
-  buildClean();
-  renderMonthFilters();
-  renderAll();
-  notify(`Imported ${added} records from ${pendingCSVFile}`);
+    let added = 0;
+    for (let i = 0; i < rows.length; i += 500) {
+      const batch = rows.slice(i, i + 500);
+      const { error } = await supabase
+        .from('clock_records')
+        .upsert(batch, { onConflict: 'employee_id,date' });
+      if (error) throw error;
+      added += batch.length;
+    }
+
+    newRecs.forEach(r => {
+      RAW.push({
+        employee: r.employee,
+        employee_id: empIds[r.employee],
+        date: r.date,
+        day: r.day,
+        time_in: r.time_in,
+        time_out: r.time_out,
+        work_hours: r.work_hours,
+        missing_out: r.missing_out,
+      });
+      if (!activeStatus.hasOwnProperty(r.employee)) activeStatus[r.employee] = true;
+    });
+
+    saveCSVToHistory(pendingCSVFile, pendingCSVRecords, pendingRawCSV);
+    closeModal();
+    buildClean();
+    renderMonthFilters();
+    renderAll();
+    notify(`Saved ${added} records from ${pendingCSVFile}`);
+  } catch (err) {
+    // Left the modal open on failure (instead of closeModal()) so pendingCSVRecords
+    // survives and the user can retry without re-uploading the file — ensureEmployee's
+    // upsert is idempotent, so a retry after a partial failure is safe.
+    console.error('Clock upload error:', err);
+    notify('Error saving to database — nothing was saved. Please try again.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Import'; }
+  }
 }
 
 // ── NOTIFY ────────────────────────────────────────────────
-function notify(msg) {
+function notify(msg, type) {
   const el=document.getElementById('notif');
   if (!el) return;
-  el.textContent=msg; el.style.display='block';
-  setTimeout(()=>el.style.display='none',2500);
+  el.textContent=msg;
+  el.classList.toggle('error', type==='error');
+  el.style.display='block';
+  setTimeout(()=>el.style.display='none', type==='error'?4500:2500);
 }
 
 // ── BIRTHDAY CALENDAR ──────────────────────────────────────
@@ -1351,6 +1389,7 @@ window.switchTab = switchTab;
 window.selectYear = selectYear;
 window.selectMonth = selectMonth;
 window.toggleDetail = toggleDetail;
+window.setDetailStatusFilter = setDetailStatusFilter;
 window.toggleEmp = toggleEmp;
 window.openManageModal = openManageModal;
 window.openInactiveModal = openInactiveModal;
