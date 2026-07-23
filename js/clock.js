@@ -265,7 +265,8 @@ function calcStats(days) {
   const avgArr  = arrivals.length ? arrivals.reduce((s,r)=>s+r.time_in_min,0)/arrivals.length : null;
   const departures = workdays.filter(r=>r.time_out_min!==null);
   const avgDep  = departures.length ? departures.reduce((s,r)=>s+r.time_out_min,0)/departures.length : null;
-  const avgHrs  = present>0 ? hours/present : 0;
+  const fullDays = present - mout;
+  const avgHrs  = fullDays>0 ? hours/fullDays : 0;
   const attPct  = total>0 ? (present/total*100) : 0;
   const ontimePct = arrivals.length>0 ? (ontime/arrivals.length*100) : 0;
   return {total,present,absent,mout,hours,arrivals:arrivals.length,ontime,late,vlate,avgArr,avgDep,avgHrs,attPct,ontimePct};
@@ -597,6 +598,8 @@ function renderDetail(emp) {
     const tiStr = r.time_in || '—';
     const toStr = r.time_out || '—';
     const hrsStr = r.work_hours>0.05 ? r.work_hours.toFixed(1)+'h' : '—';
+    const shortDay = ['ontime','late','vlate','present'].includes(st) && r.work_hours>0 && r.work_hours<3;
+    const shortFlag = shortDay ? `<span title="Worked less than 3h — verify with employee" style="color:var(--red);font-size:15px;font-weight:700;margin-left:5px;">⚠</span>` : '';
     let lateBy = '';
     if (r.time_in_min!==null && r.time_in_min>p.lateMin && r.time_in_min<720) {
       const diff = r.time_in_min - p.entryMin;
@@ -608,7 +611,7 @@ function renderDetail(emp) {
       <td style="color:var(--tx3);font-size:10px;">${r.day}</td>
       <td class="mono">${tiStr} ${lateBy}</td>
       <td class="mono">${toStr}</td>
-      <td class="mono">${hrsStr}</td>
+      <td class="mono">${hrsStr}${shortFlag}</td>
       <td>${pill}</td>
     </tr>`;
   }).join('');
@@ -781,25 +784,56 @@ let pendingCSVFile = '';
 let pendingRawCSV = '';
 
 function parseCSVRecords(text) {
-  const existing = new Set(RAW.map(r=>`${r.employee}|${r.date}`));
-  const parsed = []; let cur = null;
+  const existingMap = new Map(RAW.map(r=>[`${r.employee}|${r.date}`, r]));
+  const toPunch = t => { const m = parseMin(t); return (t!=='' && m!==null) ? {str:t, min:m} : null; };
+  const parsed = []; let cur = null; let lastRec = null; let lastPunches = null;
   for (const line of text.split('\n')) {
     const parts = line.split(',').map(s=>s.trim());
     if (parts[0]==='Employee') {
       const m=(parts[3]||'').match(/(.+)\s+\(\d+\)/);
       if(m) cur=m[1].trim();
+      lastRec = null; lastPunches = null;
     } else if (['MON','TUE','WED','THU','FRI'].includes(parts[0])&&cur) {
       try {
         const [mo,dy,yr]=parts[1].split('/');
-        if (!yr) continue;
+        if (!yr) { lastRec = null; lastPunches = null; continue; }
         const ds=`${yr}-${mo.padStart(2,'0')}-${dy.padStart(2,'0')}`;
         const key=`${cur}|${ds}`;
         const ti=parts[2]||'', to=parts[3]||'', note=parts[6]||'';
         let wh=0; try{wh=parseFloat(parts[4])||0;}catch(e){}
         const mout=note.includes('Missing OUT')||(ti!==''&&to===''&&wh<0.1);
-        parsed.push({employee:cur,date:ds,day:parts[0],time_in:ti,time_out:to,work_hours:wh,missing_in:false,missing_out:mout,isNew:!existing.has(key)});
-      } catch(ex){}
+        const rec = {employee:cur,date:ds,day:parts[0],time_in:ti,time_out:to,work_hours:wh,missing_in:false,missing_out:mout,isNew:!existingMap.has(key)};
+        parsed.push(rec);
+        lastRec = rec;
+        lastPunches = [ti, to].map(toPunch).filter(Boolean);
+      } catch(ex){ lastRec = null; lastPunches = null; }
+    } else if (parts[0]==='' && parts[1]==='' && cur && lastRec && lastPunches) {
+      // Continuation row: the source system splits a day across lines whenever its own
+      // IN/OUT pairing can't match every punch (e.g. a 3rd punch with no partner lands
+      // alone on its own row, in whichever column, tagged "Missing IN"/"Missing OUT").
+      // Pool every punch seen for the day — parent row plus continuation rows — and
+      // treat the earliest as the day's IN and the latest as the day's OUT.
+      const newPunches = [parts[2]||'', parts[3]||''].map(toPunch).filter(Boolean);
+      if (newPunches.length) {
+        lastPunches = lastPunches.concat(newPunches).sort((a,b)=>a.min-b.min);
+        lastRec.time_in = lastPunches[0].str;
+        lastRec.time_out = lastPunches.length>1 ? lastPunches[lastPunches.length-1].str : '';
+        if (lastPunches.length>1) lastRec.work_hours = (lastPunches[lastPunches.length-1].min - lastPunches[0].min)/60;
+        lastRec.missing_out = lastRec.time_in!=='' && lastRec.time_out==='';
+      }
     }
+  }
+  // Flag records where the pooled punches found a wider span than what's already saved —
+  // e.g. a day saved as Missing OUT that now resolves, or a day that looked complete but
+  // was missing a 3rd punch that pushes its real OUT later. These overwrite the existing
+  // row instead of being skipped as duplicates. Never flags a day whose new hours are
+  // lower/unchanged, so a manual correction in the app won't get clobbered by a re-upload.
+  for (const rec of parsed) {
+    if (rec.isNew) continue;
+    const existing = existingMap.get(`${rec.employee}|${rec.date}`);
+    rec.isFix = !!(existing &&
+      (existing.time_in !== rec.time_in || existing.time_out !== rec.time_out) &&
+      rec.work_hours > (existing.work_hours || 0) + 0.05);
   }
   return parsed;
 }
@@ -822,7 +856,8 @@ function previewCSV(event) {
 
 function showPreviewModal(records, filename) {
   const newRecs = records.filter(r=>r.isNew);
-  const dupRecs = records.filter(r=>!r.isNew);
+  const fixRecs = records.filter(r=>r.isFix);
+  const dupRecs = records.filter(r=>!r.isNew && !r.isFix);
   const byEmp = {};
   records.forEach(r=>{ if (!byEmp[r.employee]) byEmp[r.employee]=[]; byEmp[r.employee].push(r); });
   const dates = records.map(r=>r.date).sort();
@@ -831,29 +866,31 @@ function showPreviewModal(records, filename) {
   let body = `<div class="preview-label">Period: ${period}</div>`;
   Object.entries(byEmp).sort((a,b)=>a[0].localeCompare(b[0])).forEach(([emp, recs])=>{
     const empNew = recs.filter(r=>r.isNew);
-    const empDup = recs.filter(r=>!r.isNew);
+    const empFix = recs.filter(r=>r.isFix);
+    const empDup = recs.filter(r=>!r.isNew && !r.isFix);
     const col = COLORS[emp]||'#888';
     body += `<div class="preview-emp-block">
       <div class="preview-emp-name">
         <div style="width:7px;height:7px;border-radius:50%;background:${col};flex-shrink:0;"></div>
         ${emp}
         ${empNew.length ? `<span class="preview-badge preview-new">+${empNew.length} new</span>` : ''}
+        ${empFix.length ? `<span class="preview-badge preview-fix">${empFix.length} corrected</span>` : ''}
         ${empDup.length ? `<span class="preview-badge preview-dup">${empDup.length} already exist</span>` : ''}
       </div>
       <div class="preview-rows">`;
-    const toShow = empNew.slice(0,6);
+    const toShow = [...empNew, ...empFix].slice(0,6);
     toShow.forEach(r=>{
       const ti = r.time_in||'—', to=r.time_out||'—';
       const wh = r.work_hours>0.05?r.work_hours.toFixed(1)+'h':'—';
-      const flag = r.missing_out?' ⚠ missing OUT':'';
+      const flag = r.missing_out?' ⚠ missing OUT':(r.isFix?' ✓ was missing OUT':'');
       body += `<div class="preview-row-new">+ ${r.date} ${r.day}  IN:${ti}  OUT:${to}  ${wh}${flag}</div>`;
     });
-    if (empNew.length > 6) body += `<div style="color:var(--tx3);font-size:10px;">  … and ${empNew.length-6} more new records</div>`;
+    if (empNew.length + empFix.length > 6) body += `<div style="color:var(--tx3);font-size:10px;">  … and ${empNew.length+empFix.length-6} more</div>`;
     if (empDup.length > 0) body += `<div style="color:var(--tx3);font-size:10px;">(${empDup.length} duplicate records will be skipped)</div>`;
     body += `</div></div>`;
   });
   document.getElementById('modalBody').innerHTML = body;
-  document.getElementById('modalSummary').textContent = `${newRecs.length} new records · ${dupRecs.length} duplicates skipped`;
+  document.getElementById('modalSummary').textContent = `${newRecs.length} new records · ${fixRecs.length} corrected · ${dupRecs.length} duplicates skipped`;
   document.getElementById('csvModal').classList.add('open');
 }
 
@@ -863,7 +900,7 @@ function closeModal() {
 }
 
 async function confirmUpload() {
-  const newRecs = pendingCSVRecords.filter(r=>r.isNew);
+  const newRecs = pendingCSVRecords.filter(r=>r.isNew || r.isFix);
   if (!newRecs.length) { closeModal(); return; }
 
   const btn = document.getElementById('csvImportBtn');
@@ -898,7 +935,7 @@ async function confirmUpload() {
     }
 
     newRecs.forEach(r => {
-      RAW.push({
+      const row = {
         employee: r.employee,
         employee_id: empIds[r.employee],
         date: r.date,
@@ -907,16 +944,19 @@ async function confirmUpload() {
         time_out: r.time_out,
         work_hours: r.work_hours,
         missing_out: r.missing_out,
-      });
+      };
+      const idx = RAW.findIndex(x => x.employee === r.employee && x.date === r.date);
+      if (idx >= 0) RAW[idx] = row; else RAW.push(row);
       if (!activeStatus.hasOwnProperty(r.employee)) activeStatus[r.employee] = true;
     });
 
+    const fixedCount = newRecs.filter(r=>r.isFix).length;
     saveCSVToHistory(pendingCSVFile, pendingCSVRecords, pendingRawCSV);
     closeModal();
     buildClean();
     renderMonthFilters();
     renderAll();
-    notify(`Saved ${added} records from ${pendingCSVFile}`);
+    notify(`Saved ${added} records from ${pendingCSVFile}` + (fixedCount ? ` (${fixedCount} corrected)` : ''));
   } catch (err) {
     // Left the modal open on failure (instead of closeModal()) so pendingCSVRecords
     // survives and the user can retry without re-uploading the file — ensureEmployee's
