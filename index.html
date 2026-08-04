@@ -350,7 +350,7 @@
       </div>
 
       <!-- EDIT RECORD MODAL -->
-      <div class="modal-overlay" id="editRecModal">
+      <div class="clock-modal-overlay" id="editRecModal">
         <div class="edit-rec-modal">
           <div class="edit-rec-title" id="editRecTitle">Edit Record</div>
           <div class="edit-rec-sub" id="editRecSub"></div>
@@ -366,52 +366,52 @@
       </div>
 
       <!-- INACTIVE EMPLOYEES MODAL -->
-      <div class="modal-overlay" id="inactiveModal">
-        <div class="modal" style="max-height:75vh;display:flex;flex-direction:column">
-          <div class="modal-header">
-            <div class="modal-title">Inactive Employees</div>
-            <button class="modal-close" onclick="document.getElementById('inactiveModal').classList.remove('open')">×</button>
+      <div class="clock-modal-overlay" id="inactiveModal">
+        <div class="clock-modal" style="max-height:75vh;display:flex;flex-direction:column">
+          <div class="clock-modal-header">
+            <div class="clock-modal-title">Inactive Employees</div>
+            <button class="clock-modal-close" onclick="document.getElementById('inactiveModal').classList.remove('open')">×</button>
           </div>
-          <div class="modal-body" style="padding:0;overflow-y:auto;flex:1" id="inactiveModalBody"></div>
+          <div class="clock-modal-body" style="padding:0;overflow-y:auto;flex:1" id="inactiveModalBody"></div>
         </div>
       </div>
 
       <!-- MANAGE EMPLOYEES MODAL -->
-      <div class="modal-overlay" id="manageModal">
-        <div class="modal" style="max-height:80vh;display:flex;flex-direction:column">
-          <div class="modal-header">
-            <div class="modal-title">Manage Employees</div>
-            <button class="modal-close" onclick="document.getElementById('manageModal').classList.remove('open')">×</button>
+      <div class="clock-modal-overlay" id="manageModal">
+        <div class="clock-modal" style="max-height:80vh;display:flex;flex-direction:column">
+          <div class="clock-modal-header">
+            <div class="clock-modal-title">Manage Employees</div>
+            <button class="clock-modal-close" onclick="document.getElementById('manageModal').classList.remove('open')">×</button>
           </div>
           <div style="padding:12px 20px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;background:var(--s2)">
             <input class="edit-rec-inp" id="newEmpName" placeholder="Full name" style="flex:1">
             <button class="btn-primary" onclick="addManualEmployee()" style="white-space:nowrap">+ Add</button>
           </div>
-          <div class="modal-body" style="padding:0;overflow-y:auto;flex:1" id="manageModalBody"></div>
+          <div class="clock-modal-body" style="padding:0;overflow-y:auto;flex:1" id="manageModalBody"></div>
         </div>
       </div>
 
       <!-- FILE HISTORY MODAL -->
-      <div class="modal-overlay" id="histModal">
-        <div class="modal" style="max-height:80vh;display:flex;flex-direction:column">
-          <div class="modal-header">
-            <div class="modal-title">Uploaded Files</div>
-            <button class="modal-close" onclick="document.getElementById('histModal').classList.remove('open')">×</button>
+      <div class="clock-modal-overlay" id="histModal">
+        <div class="clock-modal" style="max-height:80vh;display:flex;flex-direction:column">
+          <div class="clock-modal-header">
+            <div class="clock-modal-title">Uploaded Files</div>
+            <button class="clock-modal-close" onclick="document.getElementById('histModal').classList.remove('open')">×</button>
           </div>
-          <div class="modal-body" style="padding:0;overflow-y:auto;flex:1" id="histModalBody"></div>
+          <div class="clock-modal-body" style="padding:0;overflow-y:auto;flex:1" id="histModalBody"></div>
         </div>
       </div>
 
       <!-- CSV PREVIEW MODAL -->
-      <div class="modal-overlay" id="csvModal">
-        <div class="modal">
-          <div class="modal-header">
-            <div class="modal-title" id="modalTitle">Preview changes</div>
-            <button class="modal-close" onclick="closeModal()">×</button>
+      <div class="clock-modal-overlay" id="csvModal">
+        <div class="clock-modal">
+          <div class="clock-modal-header">
+            <div class="clock-modal-title" id="modalTitle">Preview changes</div>
+            <button class="clock-modal-close" onclick="closeModal()">×</button>
           </div>
-          <div class="modal-body" id="modalBody"></div>
-          <div class="modal-footer">
-            <span class="modal-summary" id="modalSummary"></span>
+          <div class="clock-modal-body" id="modalBody"></div>
+          <div class="clock-modal-footer">
+            <span class="clock-modal-summary" id="modalSummary"></span>
             <div style="display:flex;gap:8px;">
               <button class="btn-secondary" onclick="closeModal()">Cancel</button>
               <button class="btn-primary" id="csvImportBtn" onclick="confirmUpload()">Import</button>
