@@ -46,26 +46,26 @@
 .cal-section { display: none; }
 .cal-section.active { display: block; }
 
-/* ── MODAL OVERLAY ── */
-.modal-overlay {
+/* ── MODAL OVERLAY (clock widget only — scoped to avoid colliding with the app-wide .modal-overlay in components.css) ── */
+.clock-modal-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,.3);
   z-index: 200; display: none; align-items: center; justify-content: center;
 }
-.modal-overlay.open { display: flex; }
-.modal {
+.clock-modal-overlay.open { display: flex; }
+.clock-modal {
   background: var(--s1); border-radius: var(--radius-lg);
   width: 560px; max-width: 95vw; max-height: 80vh;
   display: flex; flex-direction: column;
   box-shadow: 0 8px 40px rgba(0,0,0,.18);
 }
-.modal-header {
+.clock-modal-header {
   padding: 16px 20px 12px; border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
 }
-.modal-title { font-size: 13px; font-weight: 600; }
-.modal-close { font-size: 18px; color: var(--tx3); cursor: pointer; line-height: 1; background: none; border: none; padding: 0 4px; }
-.modal-close:hover { color: var(--tx); }
-.modal-body { padding: 16px 20px; overflow-y: auto; flex: 1; }
+.clock-modal-title { font-size: 13px; font-weight: 600; }
+.clock-modal-close { font-size: 18px; color: var(--tx3); cursor: pointer; line-height: 1; background: none; border: none; padding: 0 4px; }
+.clock-modal-close:hover { color: var(--tx); }
+.clock-modal-body { padding: 16px 20px; overflow-y: auto; flex: 1; }
 .preview-label { font-size: 10px; font-weight: 600; color: var(--tx3); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 8px; }
 .preview-emp-block { margin-bottom: 12px; }
 .preview-emp-name { font-size: 12px; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
@@ -75,11 +75,11 @@
 .preview-dup { background: #f3f4f6; color: #9a9a94; }
 .preview-rows { font-size: 11px; font-family: 'JetBrains Mono', 'Courier New', monospace; color: var(--tx2); line-height: 1.8; }
 .preview-row-new { color: #166534; }
-.modal-footer {
+.clock-modal-footer {
   padding: 12px 20px; border-top: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
 }
-.modal-summary { font-size: 11px; color: var(--tx3); }
+.clock-modal-summary { font-size: 11px; color: var(--tx3); }
 
 /* ── FILE HISTORY MODAL ── */
 .hist-list { display: flex; flex-direction: column; }
