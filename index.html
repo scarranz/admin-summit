@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="css/charts.css">
 <link rel="stylesheet" href="css/components.css">
 <link rel="stylesheet" href="css/clock.css">
+<link rel="stylesheet" href="css/compliance.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 </head>
@@ -64,6 +65,10 @@
       <div class="nav-item" data-page="clock" onclick="window._nav('clock')">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
         Clock
+      </div>
+      <div class="nav-item" data-page="compliance" onclick="window._nav('compliance')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Compliance
       </div>
     </nav>
 
@@ -571,6 +576,73 @@
       <div class="notif" id="notif"></div>
     </section>
 
+    <!-- ═══ COMPLIANCE (read-only skeleton ported from compliance-summit — js/compliance/, css/compliance.css) ═══ -->
+    <section class="page" id="page-compliance">
+      <div class="cmp" id="cmp-root">
+        <div class="cmp-sidebar">
+          <div class="cmp-sb-brand">
+            <div class="cmp-sb-brand-name">Summit ABX</div>
+            <div class="cmp-sb-brand-sub">Compliance</div>
+          </div>
+
+          <div class="cmp-sb-nav">
+            <div class="sb-item top" data-cpage="dashboard">Dashboard</div>
+
+            <div class="sb-section">Entities</div>
+            <div class="sb-item" data-cpage="entity-advisory">Advisory</div>
+            <div class="sb-item" data-cpage="entity-fund_llc">Fund — LLC (ERA)</div>
+            <div class="sb-item" data-cpage="entity-fund_lp">Fund — LP</div>
+
+            <div class="sb-section">Internal</div>
+            <div class="sb-item" data-cpage="int-main">Policies + Employees</div>
+            <div class="sb-item" data-cpage="communication">Communication</div>
+          </div>
+
+          <div class="sb-footer">
+            <div>
+              <label style="font-size:9px;font-weight:600;color:#9CA3AF;letter-spacing:.07em;text-transform:uppercase;display:block;margin-bottom:4px">View</label>
+              <select class="nsel" id="cmp-visibility-filter" style="width:100%">
+                <option value="all">All</option>
+                <option value="external_filed">External only · regulator</option>
+                <option value="internal_only">Internal only · audit</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="cmp-main">
+          <div class="topbar">
+            <div class="tb-title" id="cmp-pt">Dashboard</div>
+            <div class="tb-sub" id="cmp-ps"></div>
+            <div class="tb-right"></div>
+          </div>
+
+          <div class="content">
+            <div class="cmp-banner">Read-only — Compliance data is a fixed snapshot, not connected to a database. Changes and uploads will not be saved, and previously uploaded files are not available.</div>
+
+            <div class="cpage" id="page-dashboard"></div>
+
+            <div class="cpage" id="page-entity-advisory"></div>
+            <div class="cpage" id="page-entity-fund_llc"></div>
+            <div class="cpage" id="page-entity-fund_lp"></div>
+
+            <div class="cpage" id="page-int-main">
+              <div class="card">
+                <div class="ch"><div><div class="ct">Internal Compliance — Technologies ABX LLC</div><div class="csub">The firm's internal policies · Supervised personnel</div></div></div>
+                <div class="stabs">
+                  <button class="stab active" data-stab="stab-pol">Internal Policies</button>
+                  <button class="stab" data-stab="stab-emp">Employees</button>
+                </div>
+                <div class="stab-pane active" id="stab-pol"><div id="page-int-pol-rows"></div></div>
+                <div class="stab-pane" id="stab-emp"><div id="page-int-emp-rows"></div></div>
+              </div>
+            </div>
+            <div class="cpage" id="page-communication"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
   </div><!-- .main -->
 </div><!-- .app -->
 
@@ -585,6 +657,7 @@ import { loadPayrollPage } from './js/payroll.js';
 import { loadOfficePage } from './js/office.js';
 import { loadOverviewPage } from './js/overview.js';
 import { loadClockPage } from './js/clock.js';
+import { loadCompliancePage } from './js/compliance/index.js';
 
 const statusEl = document.getElementById('status');
 
@@ -604,6 +677,7 @@ async function boot() {
       registerPageLoader('payroll', loadPayrollPage);
       registerPageLoader('office', loadOfficePage);
       registerPageLoader('clock', loadClockPage);
+      registerPageLoader('compliance', loadCompliancePage);
 
       // Show app, hide loading
       document.getElementById('loadingWrap').style.display = 'none';
