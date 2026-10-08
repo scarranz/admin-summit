@@ -3,13 +3,12 @@ import { $, MONTH_NAMES, monthOf, filingUrgency, fmtDate } from './utils.js';
 import { show } from './nav.js';
 import { openRegulatoryCheck } from './regcheck.js';
 
-// NAV Statement filings are seeded but not ready to surface on the dashboard yet
-// (Deborah, 2026-09-09) — hidden here, not deleted; data stays in Supabase.
+// NAV Statement filings are seeded but not ready to surface on the dashboard yet —
+// hidden here, not deleted; data stays in Supabase.
 const isHiddenFiling = (f) => (f.name || '').startsWith('NAV Statement');
 
-// Status reads from text only — no color anywhere in the calendar
-// (Deborah, 2026-09-22, extending the "badges carry no color" rule from
-// filing/policy rows to the calendar itself).
+// Status reads from text only — no color anywhere in the calendar, extending
+// the "badges carry no color" rule from filing/policy rows to the calendar itself.
 function badgeText(f) {
   const urgency = filingUrgency(f);
   if (f.status === 'completed') return 'Completed';

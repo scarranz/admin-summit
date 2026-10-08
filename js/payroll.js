@@ -18,10 +18,11 @@ const payState = {
   chart: { granularity: 'monthly', type: 'bar', range: '12m', metric: 'amount' }
 };
 
-// Default-active employees — the 6 currently on payroll
+// Default-active employees — shown by default. The rest (Pablo Valles,
+// Debby Posternak, Luis Catan) are hidden unless "show inactive" is toggled;
+// totals still include everyone.
 const DEFAULT_ACTIVE_EMPLOYEES = new Set([
-  'San Alvarez', 'Oscar Cordova', 'Pablo Valles',
-  'Debby Posternak', 'Daniel Alvarez', 'Luis Catan'
+  'San Alvarez', 'Oscar Cordova', 'Daniel Alvarez'
 ]);
 
 // ─── Employee helpers ───

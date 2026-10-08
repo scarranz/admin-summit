@@ -20,14 +20,13 @@ $$ language plpgsql;
 create table user_roles (
   id         uuid primary key default gen_random_uuid(),
   user_id    uuid unique references auth.users(id),  -- null until first login
-  role       text not null check (role in ('san', 'deborah', 'oscar')),
+  role       text not null check (role = 'san'),
   email      text not null unique
 );
 
--- Seed the two v1 users (user_id filled by post-login trigger)
+-- Seed users (user_id filled by post-login trigger)
 insert into user_roles (email, role) values
-  ('scarranza@summit-mgmtx.com', 'san'),
-  ('dposternak@summit-mgmtx.com', 'deborah');
+  ('scarranza@summit-mgmtx.com', 'san');
 
 -- Post-login function: backfills user_id when a user signs in
 -- for the first time. Called by the auth trigger below.
