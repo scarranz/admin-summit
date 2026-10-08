@@ -5,8 +5,6 @@ import { supabase } from './supabase-client.js';
 
 const ROLE_CONFIG = {
   san:     { name: 'San',     label: 'Founder',    allowedPages: ['overview', 'revenue', 'payroll', 'office', 'clock', 'compliance'], defaultPage: 'revenue' },
-  deborah: { name: 'Deborah', label: 'Operations', allowedPages: ['revenue', 'office', 'clock', 'compliance'], defaultPage: 'office' },
-  oscar:   { name: 'Oscar',   label: 'IT',         allowedPages: ['clock', 'compliance'], defaultPage: 'clock' },
 };
 
 let _currentRole = null;  // populated after login
